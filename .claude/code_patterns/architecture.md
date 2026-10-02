@@ -1,0 +1,1 @@
+../../.agents/code_patterns/architecture.md
