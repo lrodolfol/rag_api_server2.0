@@ -21,10 +21,7 @@ For example:
 
 ```text
 src/
-├── domain/
-├── application/
-├── infrastructure/
-└── api/
+|...
 ```
 
 ### Domain
@@ -39,33 +36,6 @@ The domain should not depend on:
 * boto3.
 * HTTP clients.
 * Database implementations.
-
-### Application
-
-Contains use cases and application orchestration.
-
-Example:
-
-```text
-application/
-├── create_customer.py
-├── update_customer.py
-└── get_customer.py
-```
-
-### Infrastructure
-
-Contains implementations that interact with external systems.
-
-Examples:
-
-```text
-infrastructure/
-├── database/
-├── repositories/
-├── messaging/
-└── external_services/
-```
 
 ### API
 
@@ -112,19 +82,6 @@ Use dependency injection when it improves:
 
 Avoid creating abstractions for every class without a concrete need.
 
-## Repositories
-
-Repositories should abstract persistence concerns when the domain or application should not depend directly on database implementations.
-
-Example:
-
-```python
-class CustomerRepository(Protocol):
-    def get_by_id(self, customer_id: int) -> Customer | None:
-        ...
-```
-
-Infrastructure provides the implementation.
 
 ## Configuration
 

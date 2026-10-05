@@ -26,7 +26,7 @@ Esta aplicação usará a mensagem dos usuários para encontrar as empresas ou s
 - Ter um endpoint para receber as informações das empresas/negócios dos clientes e persistir em forma de embedding
 
 ### Exibicao do resultado
-- Os 5 melhores resultados em similaridade devem ser exibidos para o usuário. Cada resultado em uma mensagem.
+- Somente os itens com similaridade maior que 0.9 devem ser retornados.
 - Cada resultado deverá ter um link para e-mail, telefone e contato do whatsapp (se existir)
 
 ## Fluxo principal
@@ -35,14 +35,13 @@ Esta aplicação usará a mensagem dos usuários para encontrar as empresas ou s
 - Cliente informa os dados da empresa/negócio
 - Aplicação normaliza os dados (remove erros ortográficos, remove linhas em branco, Ignora se tiver palavrões ou ofensas)
 - Aplicação faz a categorização das informações (comida, cada, transporte, contrução, religião etc..)
-- Grava as informações do cliente na base de dados normalizada (postgresql)
-- Grava as informações do cliente na base de dados em forma de vetores (postgresql ou pinecone)
+- Grava as informações do cliente na base de dados em forma de vetores (pinecone)
 - Grava as informações do cliente num arquivo bucket especifico para categorização
 
 ## Busca de informações
 - Cliente envia mensagem, exemplo "onde posso comer?"
 - API recebe a mensagem e busca o historio de mensagem do usuario (se existir)
 - Aplicação gera os embeddings da mensagem via LLM (openAI)
-- Aplicação consulta a base de dados de vetores e retorna os 5 itens com maiores similaridades
+- Aplicação consulta a base de dados de vetores e somente os itens com similaridade maior que 0.9
 - Aplicação consulta LLM (opnIA) para gerar a resposta baseada nos itens com maiores similaridades
 - Envia o historio de mensagens do usuário com TTL de 30 min

@@ -6,8 +6,8 @@ Este projeto é um **monorepo em python que serve com uma API para aplicação d
 
 ## Tecnologias
 - Python 3.11.x with FastAPI
-- Postgresql
-- API chatGPT
+- Pinecone
+- API OpenAI
 - Redis
 - LangChain
 
@@ -51,14 +51,11 @@ Before running Python commands, tests, linters, formatters, or application scrip
 The project follows this general structure:
 
 src/
-├── domain/ (entidades e modelos)
-├── application/
-├── infrastructure/
-└── api/
-├── helpers/
+|...
 
 tests/
 ├── unit/
+|...
 
 
 ## Architecture

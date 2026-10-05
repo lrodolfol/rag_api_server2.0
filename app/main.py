@@ -5,21 +5,19 @@ Wires together logging, configuration and the API routers, exposing a
 """
 
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 
 from app.api.routes import health
-from app.infrastructure.config.settings import Settings, get_settings
 from app.infrastructure.logging.logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    settings: Settings = application.state.settings
-    logger.info("Application starting", extra={"environment": settings.environment})
+async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
+    logger.info("Application starting", extra={"environment": "development"})
     yield
     logger.info("Application shutting down")
 
@@ -27,14 +25,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application instance."""
     configure_logging()
-    settings = get_settings()
 
     application = FastAPI(
         title="RAG API Server",
         version="2.0.0",
         lifespan=lifespan,
     )
-    application.state.settings = settings
     application.include_router(health.router)
     return application
 

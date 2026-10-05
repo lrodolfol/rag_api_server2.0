@@ -1,13 +1,13 @@
-# AGENTS.md
+# CLAUDE.md
 
-Guide for AI agents when working with the code in this repository.
+Guia para agentes de IA ao trabalhar com o código deste repositório.
 
-This project is a **python monorepo that serves as an API for a RAG (retrieval augmented generation) application**
+Este projeto é um **monorepo em python que serve com uma API para aplicação de RAG (retrieval augmented generation)**
 
-## Technologies
+## Tecnologias
 - Python 3.11.x with FastAPI
-- Postgresql
-- API chatGPT
+- Pinecone
+- API OpenAI
 - Redis
 - LangChain
 
@@ -19,9 +19,9 @@ The virtual environment is located at: .venv/
 Never install Python packages globally.
 Before running Python commands, tests, linters, formatters, or application scripts, make sure the .venv environment is being used.
 
-### Priorities
+### Prioridades
 
-- **Always check the code_patterns inside ./claude/code_patterns** before implementing any modifications
+- **Sempre verifique as instruções dentro de ./claude/code_patterns** antes de implementar qualquer modificação
 - Do not introduce architectural patterns, dependencies, or abstractions without a clear reason.
 
 ### General Rules
@@ -51,14 +51,11 @@ Before running Python commands, tests, linters, formatters, or application scrip
 The project follows this general structure:
 
 src/
-├── domain/ (entities and models)
-├── application/
-├── infrastructure/
-└── api/
-├── helpers/
+|...
 
 tests/
 ├── unit/
+|...
 
 
 ## Architecture
@@ -148,8 +145,8 @@ When implementing a task:
 7. Review the final diff.
 8. Report what changed and any relevant limitations.
 
-### Project commands
-- **ALWAYS RUN THE COMMANDS INSIDE THE venv**
+### Comandos do projeto
+- **SEMPRE EXECUTE OS COMANDOS DENTRO DO venv**
 
 ```bash
 python -m venv .venv            #Create the virtual environment if it does not existi

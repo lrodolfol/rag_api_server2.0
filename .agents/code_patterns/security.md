@@ -61,38 +61,6 @@ Regularly check for known vulnerabilities.
 
 Do not install packages without verifying their source and purpose.
 
-## Authentication
-
-Never implement custom cryptography unless there is a strong and well-understood requirement.
-
-Prefer established libraries and protocols.
-
-## Authorization
-
-Authentication answers:
-
-> Who are you?
-
-Authorization answers:
-
-> What are you allowed to do?
-
-Always enforce authorization on the server side.
-
-Do not trust authorization information supplied only by the client.
-
-## File Handling
-
-Treat uploaded files as untrusted.
-
-Validate:
-
-* file type,
-* file size,
-* file name,
-* storage location.
-
-Avoid using user-provided paths directly.
 
 ## External APIs
 
