@@ -25,10 +25,10 @@ LangChain. Depende da Tarefa 2.0.
 
 ## Subtarefas
 
-- [ ] 4.1 Função de normalização do texto.
-- [ ] 4.2 Função de geração de chunks (LangChain).
-- [ ] 4.3 Testes de unidade (normalização + chunking determinístico).
-- [ ] 4.4 Testes de integração (texto realista de cadastro → chunks).
+- [x] 4.1 Função de normalização do texto.
+- [x] 4.2 Função de geração de chunks (LangChain).
+- [x] 4.3 Testes de unidade (normalização + chunking determinístico).
+- [x] 4.4 Testes de integração (texto realista de cadastro → chunks).
 
 ## Detalhes de Implementação
 
@@ -43,8 +43,8 @@ Ver `tasks/techspec.md` §1.2, §1.3 e `.agents/instructions/gerar_chunks.md`
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade
-- [ ] Testes de integração
+- [x] Testes de unidade
+- [x] Testes de integração
 - [ ] Testes E2E (se aplicável) — N/A
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>

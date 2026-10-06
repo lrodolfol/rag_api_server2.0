@@ -9,7 +9,7 @@ em `tasks/techspec.md` e `tasks/prd.md` — os arquivos de tarefa apenas referen
 - [x] 1.0 Fundação de Configuração (settings tipado + `env.json` + variáveis de ambiente)
 - [x] 2.0 Modelos de Domínio e Exceções
 - [x] 3.0 Serviço de Integração OpenAI (moderação, embeddings, chat)
-- [ ] 4.0 Serviço de Processamento de Texto (normalização + chunking LangChain)
+- [x] 4.0 Serviço de Processamento de Texto (normalização + chunking LangChain)
 - [ ] 5.0 Repositório de Vetores Pinecone (índice, upsert, delete, query com similaridade > 0.9)
 - [ ] 6.0 Serviço de Armazenamento em Bucket S3 (JSONL)
 - [ ] 7.0 Histórico no Redis + Rate Limiter em memória
