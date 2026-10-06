@@ -3,6 +3,7 @@
 Guia para agentes de IA ao trabalhar com o código deste repositório.
 
 Este projeto é um **monorepo em python que serve com uma API para aplicação de RAG (retrieval augmented generation)**
+Ele já contém alguns arquivo iniciais feitos para validar o funcionamento básico como `@app\main.py`, `@app\api\routes\health.py`.
 
 ## Tecnologias
 - Python 3.11.x with FastAPI

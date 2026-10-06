@@ -33,10 +33,9 @@ Esta aplicação usará a mensagem dos usuários para encontrar as empresas ou s
 
 ### Cadastro de empresa/negócio
 - Cliente informa os dados da empresa/negócio
-- Aplicação normaliza os dados (remove erros ortográficos, remove linhas em branco, Ignora se tiver palavrões ou ofensas)
-- Aplicação faz a categorização das informações (comida, cada, transporte, contrução, religião etc..)
+- Aplicação normaliza os dados (remove linhas em branco, Ignora se tiver palavrões ou ofensas)
 - Grava as informações do cliente na base de dados em forma de vetores (pinecone)
-- Grava as informações do cliente num arquivo bucket especifico para categorização
+- Grava as informações do cliente num arquivo bucket especifico
 
 ## Busca de informações
 - Cliente envia mensagem, exemplo "onde posso comer?"

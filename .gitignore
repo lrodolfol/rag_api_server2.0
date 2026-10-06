@@ -150,6 +150,8 @@ activemq-data/
 # Environments
 .env
 .envrc
+# Local configuration file (non-secret dynamic values); use env.example.json as template
+env.json
 .venv
 env/
 venv/
@@ -216,3 +218,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+/tasks/prd
