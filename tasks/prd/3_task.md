@@ -30,12 +30,12 @@ histórico e nos trechos similares. Depende das Tarefas 1.0 e 2.0.
 
 ## Subtarefas
 
-- [ ] 3.1 Cliente/wrapper OpenAI configurável a partir da config.
-- [ ] 3.2 Verificação de conteúdo inapropriado (contrato `insult`).
-- [ ] 3.3 Geração de embeddings (chunks e pergunta).
-- [ ] 3.4 Geração de resposta de chat (histórico + trechos).
-- [ ] 3.5 Testes de unidade (com mock do cliente OpenAI).
-- [ ] 3.6 Testes de integração do serviço (cliente fake/mocked, sem chamadas reais).
+- [x] 3.1 Cliente/wrapper OpenAI configurável a partir da config.
+- [x] 3.2 Verificação de conteúdo inapropriado (contrato `insult`).
+- [x] 3.3 Geração de embeddings (chunks e pergunta).
+- [x] 3.4 Geração de resposta de chat (histórico + trechos).
+- [x] 3.5 Testes de unidade (com mock do cliente OpenAI).
+- [x] 3.6 Testes de integração do serviço (cliente fake/mocked, sem chamadas reais).
 
 ## Detalhes de Implementação
 
@@ -52,8 +52,8 @@ chat e `model_historic` (§2.4). Melhorar os exemplos conforme as convenções d
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade
-- [ ] Testes de integração
+- [x] Testes de unidade
+- [x] Testes de integração
 - [ ] Testes E2E (se aplicável) — N/A
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>
