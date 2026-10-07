@@ -4,17 +4,16 @@ Thin HTTP handler that first enforces the per-IP rate limit, then delegates the
 retrieval-augmented-generation flow to the shared :class:`SearchService`, using
 the online history channel and the caller's ``user_code`` as the per-user
 history key. Exceeding the limit raises the domain :class:`RateLimitError`,
-translated into the standard :class:`ApiResponse` envelope by a dedicated
-exception handler.
+translated into the standard :class:`ApiResponse` envelope by the global
+exception handlers (``app/api/errors``).
 """
 
-from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, status
 
 from app.api.dependencies import get_rate_limiter, get_search_service
 from app.api.patterns.response import ApiResponse
 from app.application.search import SearchService
-from app.domain import OnlineChatSearchPayload, RateLimitError
+from app.domain import OnlineChatSearchPayload
 from app.infrastructure.rate_limit import InMemoryRateLimiter
 from app.infrastructure.redis import HistoryChannel
 
@@ -33,18 +32,3 @@ async def search_chat(
         HistoryChannel.ONLINE, payload.user_code, payload.message
     )
     return ApiResponse(status_code=status.HTTP_200_OK, message=answer)
-
-
-async def rate_limit_exceeded_handler(
-    _: Request, exception: RateLimitError
-) -> JSONResponse:
-    """Translate a rate-limit error into the standard envelope."""
-    body = ApiResponse(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        message=str(exception),
-        errors=["rate_limit_exceeded"],
-    )
-    return JSONResponse(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        content=body.model_dump(),
-    )

@@ -2,18 +2,17 @@
 
 Thin HTTP handler that delegates the whole ingestion flow to
 :class:`RegistrationService`. Inappropriate content raised by the service is
-translated into the standard :class:`ApiResponse` envelope by a dedicated
-exception handler, keeping the handler itself a single delegation and never
-leaking the offending text back to the client.
+translated into the standard :class:`ApiResponse` envelope by the global
+exception handlers (``app/api/errors``), keeping the handler itself a single
+delegation and never leaking the offending text back to the client.
 """
 
-from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, status
 
 from app.api.dependencies import get_registration_service
 from app.api.patterns.response import ApiResponse
 from app.application.registration import RegistrationService
-from app.domain import CompanyRegistrationRequest, InappropriateContentError
+from app.domain import CompanyRegistrationRequest
 
 router = APIRouter(tags=["registration"])
 
@@ -32,19 +31,4 @@ async def register_company(
     return ApiResponse(
         status_code=status.HTTP_201_CREATED,
         message="Company registered successfully",
-    )
-
-
-async def inappropriate_content_handler(
-    _: Request, exception: InappropriateContentError
-) -> JSONResponse:
-    """Translate an inappropriate-content error into the standard envelope."""
-    body = ApiResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        message=str(exception),
-        errors=["inappropriate_content"],
-    )
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content=body.model_dump(),
     )

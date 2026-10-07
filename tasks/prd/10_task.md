@@ -28,11 +28,11 @@ ponta-a-ponta com testes de integração. Depende das Tarefas 8.0 e 9.0.
 
 ## Subtarefas
 
-- [ ] 10.1 Centralizar DI em `app/api/dependencies.py`.
-- [ ] 10.2 Registrar todos os routers no app factory (`app/main.py`).
-- [ ] 10.3 Exception handlers globais → envelope `ApiResponse`.
-- [ ] 10.4 Testes de integração E2E dos fluxos de cadastro e busca.
-- [ ] 10.5 Rodar lint, type check e toda a suíte de testes.
+- [x] 10.1 Centralizar DI em `app/api/dependencies.py`.
+- [x] 10.2 Registrar todos os routers no app factory (`app/main.py`).
+- [x] 10.3 Exception handlers globais → envelope `ApiResponse`.
+- [x] 10.4 Testes de integração E2E dos fluxos de cadastro e busca.
+- [x] 10.5 Rodar lint, type check e toda a suíte de testes.
 
 ## Detalhes de Implementação
 
@@ -50,9 +50,9 @@ detalhes internos (ver `security.md`).
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade
-- [ ] Testes de integração
-- [ ] Testes E2E (fluxos de cadastro, WhatsApp e chat online)
+- [x] Testes de unidade
+- [x] Testes de integração
+- [x] Testes E2E (fluxos de cadastro, WhatsApp e chat online)
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>
 

@@ -9,8 +9,8 @@ from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 
+from app.api.errors import register_exception_handlers
 from app.api.routes import chat, health, registration, whatsapp
-from app.domain import InappropriateContentError, RateLimitError
 from app.infrastructure.logging.logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -36,14 +36,7 @@ def create_app() -> FastAPI:
     application.include_router(registration.router)
     application.include_router(whatsapp.router)
     application.include_router(chat.router)
-    application.add_exception_handler(
-        InappropriateContentError,
-        registration.inappropriate_content_handler,
-    )
-    application.add_exception_handler(
-        RateLimitError,
-        chat.rate_limit_exceeded_handler,
-    )
+    register_exception_handlers(application)
     return application
 
 
