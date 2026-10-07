@@ -20,3 +20,7 @@ class InappropriateContentError(DomainError):
 
 class RateLimitError(DomainError):
     """Raised when a caller exceeds the allowed request/message limit."""
+
+
+class VectorRepositoryError(DomainError):
+    """Raised when an interaction with the vector database fails."""

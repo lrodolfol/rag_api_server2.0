@@ -28,12 +28,12 @@ Tarefas 1.0 e 2.0.
 
 ## Subtarefas
 
-- [ ] 5.1 Criação de índice condicional a partir da config.
-- [ ] 5.2 Upsert de vetores com metadados.
-- [ ] 5.3 Delete por `user_code`.
-- [ ] 5.4 Query com corte de similaridade > 0.9.
-- [ ] 5.5 Testes de unidade (cliente Pinecone mockado).
-- [ ] 5.6 Testes de integração (fake/mock, sem serviço real).
+- [x] 5.1 Criação de índice condicional a partir da config.
+- [x] 5.2 Upsert de vetores com metadados.
+- [x] 5.3 Delete por `user_code`.
+- [x] 5.4 Query com corte de similaridade > 0.9.
+- [x] 5.5 Testes de unidade (cliente Pinecone mockado).
+- [x] 5.6 Testes de integração (fake/mock, sem serviço real).
 
 ## Detalhes de Implementação
 
@@ -49,8 +49,8 @@ O corte de 0.9 é requisito do PRD (seção "Exibição do resultado").
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade
-- [ ] Testes de integração
+- [x] Testes de unidade
+- [x] Testes de integração
 - [ ] Testes E2E (se aplicável) — N/A
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>

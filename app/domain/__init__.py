@@ -17,6 +17,7 @@ from app.domain.exceptions import (
     InappropriateContentError,
     OpenIaException,
     RateLimitError,
+    VectorRepositoryError,
 )
 from app.domain.search import OnlineChatSearchPayload, WhatsAppSearchPayload
 
@@ -32,5 +33,6 @@ __all__ = [
     "OpenIaException",
     "PayloadQuestionOpenIA",
     "RateLimitError",
+    "VectorRepositoryError",
     "WhatsAppSearchPayload",
 ]
