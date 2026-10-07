@@ -15,6 +15,7 @@ from app.domain.embedding import EmbeddingRecord
 from app.domain.exceptions import (
     ClientStorageError,
     DomainError,
+    HistoryStoreError,
     InappropriateContentError,
     OpenIaException,
     RateLimitError,
@@ -28,6 +29,7 @@ __all__ = [
     "CompanyRegistrationRequest",
     "DomainError",
     "EmbeddingRecord",
+    "HistoryStoreError",
     "InappropriateContentError",
     "MessageHistoryItem",
     "MessageRole",

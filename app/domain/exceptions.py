@@ -26,5 +26,9 @@ class VectorRepositoryError(DomainError):
     """Raised when an interaction with the vector database fails."""
 
 
+class HistoryStoreError(DomainError):
+    """Raised when an interaction with the conversation history store fails."""
+
+
 class ClientStorageError(DomainError):
     """Raised when persisting a client record to object storage fails."""

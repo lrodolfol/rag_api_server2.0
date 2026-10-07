@@ -28,10 +28,10 @@ Tarefas 1.0 e 2.0.
 
 ## Subtarefas
 
-- [ ] 7.1 Store de histórico no Redis (get/append) com TTL de 30 min e chaves por canal.
-- [ ] 7.2 Rate limiter em memória por IP (limite 3, TTL 5h) com mensagem de bloqueio padronizada.
-- [ ] 7.3 Testes de unidade do rate limiter (contagem, expiração).
-- [ ] 7.4 Testes de unidade/integração do histórico (Redis fake, ex.: `fakeredis`).
+- [x] 7.1 Store de histórico no Redis (get/append) com TTL de 30 min e chaves por canal.
+- [x] 7.2 Rate limiter em memória por IP (limite 3, TTL 5h) com mensagem de bloqueio padronizada.
+- [x] 7.3 Testes de unidade do rate limiter (contagem, expiração).
+- [x] 7.4 Testes de unidade/integração do histórico (Redis fake, ex.: `fakeredis`).
 
 ## Detalhes de Implementação
 
@@ -48,8 +48,8 @@ seguir o padrão de API (`.agents/code_patterns/api.md`, envelope `ApiResponse`)
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade
-- [ ] Testes de integração
+- [x] Testes de unidade
+- [x] Testes de integração
 - [ ] Testes E2E (se aplicável) — N/A
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>
