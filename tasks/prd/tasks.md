@@ -11,7 +11,7 @@ em `tasks/techspec.md` e `tasks/prd.md` — os arquivos de tarefa apenas referen
 - [x] 3.0 Serviço de Integração OpenAI (moderação, embeddings, chat)
 - [x] 4.0 Serviço de Processamento de Texto (normalização + chunking LangChain)
 - [x] 5.0 Repositório de Vetores Pinecone (índice, upsert, delete, query com similaridade > 0.9)
-- [ ] 6.0 Serviço de Armazenamento em Bucket S3 (JSONL)
+- [x] 6.0 Serviço de Armazenamento em Bucket S3 (JSONL)
 - [ ] 7.0 Histórico no Redis + Rate Limiter em memória
 - [ ] 8.0 Funcionalidade de Cadastro de Empresa (ingestão + endpoint)
 - [ ] 9.0 Funcionalidade de Busca (serviço compartilhado + endpoints WhatsApp e chat online)

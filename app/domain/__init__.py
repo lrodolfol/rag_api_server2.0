@@ -13,6 +13,7 @@ from app.domain.conversation import (
 )
 from app.domain.embedding import EmbeddingRecord
 from app.domain.exceptions import (
+    ClientStorageError,
     DomainError,
     InappropriateContentError,
     OpenIaException,
@@ -22,6 +23,7 @@ from app.domain.exceptions import (
 from app.domain.search import OnlineChatSearchPayload, WhatsAppSearchPayload
 
 __all__ = [
+    "ClientStorageError",
     "CompanyData",
     "CompanyRegistrationRequest",
     "DomainError",

@@ -24,10 +24,10 @@ como parte do fluxo de cadastro de empresa. Depende das Tarefas 1.0 e 2.0.
 
 ## Subtarefas
 
-- [ ] 6.1 Cliente de bucket configurável a partir da config.
-- [ ] 6.2 Escrita/atualização do registro do cliente em JSONL.
-- [ ] 6.3 Testes de unidade (cliente S3 mockado, ex.: `moto`/stub).
-- [ ] 6.4 Testes de integração (bucket fake/local, sem serviço real).
+- [x] 6.1 Cliente de bucket configurável a partir da config.
+- [x] 6.2 Escrita/atualização do registro do cliente em JSONL.
+- [x] 6.3 Testes de unidade (cliente S3 mockado, ex.: `moto`/stub).
+- [x] 6.4 Testes de integração (bucket fake/local, sem serviço real).
 
 ## Detalhes de Implementação
 
@@ -42,9 +42,9 @@ Ver `tasks/techspec.md` §1.5 (nome do bucket e formato `jsonl`) e a seção `bu
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade
-- [ ] Testes de integração
-- [ ] Testes E2E (se aplicável) — N/A
+- [x] Testes de unidade
+- [x] Testes de integração
+- [x] Testes E2E (se aplicável) — N/A
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>
 
