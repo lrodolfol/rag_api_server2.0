@@ -30,12 +30,12 @@ adicionalmente o rate limit por IP em memória. Reutiliza as Tarefas 3.0, 5.0 e 
 
 ## Subtarefas
 
-- [ ] 9.1 Serviço de busca compartilhado (histórico → embeddings → Pinecone → OpenAI).
-- [ ] 9.2 Endpoint WhatsApp (chave de histórico própria).
-- [ ] 9.3 Endpoint chat online (chave própria + rate limit por IP).
-- [ ] 9.4 Atualização do histórico pós-resposta (TTL 30 min).
-- [ ] 9.5 Testes de unidade do serviço de busca (dependências mockadas).
-- [ ] 9.6 Testes de integração dos dois endpoints, incluindo o caso de bloqueio por rate limit.
+- [x] 9.1 Serviço de busca compartilhado (histórico → embeddings → Pinecone → OpenAI).
+- [x] 9.2 Endpoint WhatsApp (chave de histórico própria).
+- [x] 9.3 Endpoint chat online (chave própria + rate limit por IP).
+- [x] 9.4 Atualização do histórico pós-resposta (TTL 30 min).
+- [x] 9.5 Testes de unidade do serviço de busca (dependências mockadas).
+- [x] 9.6 Testes de integração dos dois endpoints, incluindo o caso de bloqueio por rate limit.
 
 ## Detalhes de Implementação
 
@@ -52,9 +52,9 @@ similaridade 0.9 vem do PRD. Reutilizar a Tarefa 7.0 para histórico e rate limi
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade
-- [ ] Testes de integração
-- [ ] Testes E2E (se aplicável) — pergunta → resposta (dependências mock)
+- [x] Testes de unidade
+- [x] Testes de integração
+- [x] Testes E2E (se aplicável) — pergunta → resposta (dependências mock)
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>
 

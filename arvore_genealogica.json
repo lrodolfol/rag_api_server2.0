@@ -1,0 +1,32 @@
+{
+    "maria": {
+        "husband": "antonio",
+        "children": ["darcilio"]
+    },
+    "antonio": {
+        "wife": "maria",
+        "children": ["darcilio"]
+    },
+    "darcilio": {
+        "wife1": "auxiliadora",
+        "wife2": "amanda",
+        "children": ["laura", "joao", "breno"]
+    },
+    "auxiliadora": {
+        "husband": "darcilio",
+        "children": ["laura", "joao"]
+    },
+    "amanda": {
+        "husband": "darcilio",
+        "children": ["breno"]
+    },
+    "laura": {
+        "parents": ["darcilio", "auxiliadora"]
+    },
+    "joao": {
+        "parents": ["darcilio", "auxiliadora"]
+    },
+    "breno": {
+        "parents": ["darcilio", "amanda"]
+    }
+}

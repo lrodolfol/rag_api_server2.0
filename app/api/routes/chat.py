@@ -1,0 +1,50 @@
+"""Online-chat search route.
+
+Thin HTTP handler that first enforces the per-IP rate limit, then delegates the
+retrieval-augmented-generation flow to the shared :class:`SearchService`, using
+the online history channel and the caller's ``user_code`` as the per-user
+history key. Exceeding the limit raises the domain :class:`RateLimitError`,
+translated into the standard :class:`ApiResponse` envelope by a dedicated
+exception handler.
+"""
+
+from fastapi import APIRouter, Depends, Request, status
+from fastapi.responses import JSONResponse
+
+from app.api.dependencies import get_rate_limiter, get_search_service
+from app.api.patterns.response import ApiResponse
+from app.application.search import SearchService
+from app.domain import OnlineChatSearchPayload, RateLimitError
+from app.infrastructure.rate_limit import InMemoryRateLimiter
+from app.infrastructure.redis import HistoryChannel
+
+router = APIRouter(tags=["search"])
+
+
+@router.post("/chat", response_model=ApiResponse)
+async def search_chat(
+    payload: OnlineChatSearchPayload,
+    service: SearchService = Depends(get_search_service),
+    limiter: InMemoryRateLimiter = Depends(get_rate_limiter),
+) -> ApiResponse:
+    """Answer an online-chat message, enforcing the per-IP rate limit first."""
+    await limiter.check_and_increment(str(payload.user_ip))
+    answer = await service.search(
+        HistoryChannel.ONLINE, payload.user_code, payload.message
+    )
+    return ApiResponse(status_code=status.HTTP_200_OK, message=answer)
+
+
+async def rate_limit_exceeded_handler(
+    _: Request, exception: RateLimitError
+) -> JSONResponse:
+    """Translate a rate-limit error into the standard envelope."""
+    body = ApiResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        message=str(exception),
+        errors=["rate_limit_exceeded"],
+    )
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content=body.model_dump(),
+    )
