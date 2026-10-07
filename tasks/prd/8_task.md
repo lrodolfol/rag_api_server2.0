@@ -26,11 +26,11 @@ gravação no bucket S3. Reutiliza as Tarefas 3.0, 4.0, 5.0 e 6.0.
 
 ## Subtarefas
 
-- [ ] 8.1 Serviço de aplicação de ingestão orquestrando o fluxo 1.
-- [ ] 8.2 Rota POST de cadastro em `app/api/routes` (handler fino).
-- [ ] 8.3 Tratamento do caso de conteúdo ofensivo (interrupção + resposta).
-- [ ] 8.4 Testes de unidade do serviço (dependências mockadas).
-- [ ] 8.5 Testes de integração do endpoint (via `httpx`/`TestClient`, dependências fake).
+- [x] 8.1 Serviço de aplicação de ingestão orquestrando o fluxo 1.
+- [x] 8.2 Rota POST de cadastro em `app/api/routes` (handler fino).
+- [x] 8.3 Tratamento do caso de conteúdo ofensivo (interrupção + resposta).
+- [x] 8.4 Testes de unidade do serviço (dependências mockadas).
+- [x] 8.5 Testes de integração do endpoint (via `httpx`/`TestClient`, dependências fake).
 
 ## Detalhes de Implementação
 
@@ -46,9 +46,9 @@ Manter cada método com menos de 30 linhas e a lógica segregada por responsabil
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade
-- [ ] Testes de integração
-- [ ] Testes E2E (se aplicável) — cadastro → verificação de persistência (mock)
+- [x] Testes de unidade
+- [x] Testes de integração
+- [x] Testes E2E (se aplicável) — cadastro → verificação de persistência (mock)
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>
 

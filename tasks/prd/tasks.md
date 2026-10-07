@@ -13,6 +13,6 @@ em `tasks/techspec.md` e `tasks/prd.md` — os arquivos de tarefa apenas referen
 - [x] 5.0 Repositório de Vetores Pinecone (índice, upsert, delete, query com similaridade > 0.9)
 - [x] 6.0 Serviço de Armazenamento em Bucket S3 (JSONL)
 - [x] 7.0 Histórico no Redis + Rate Limiter em memória
-- [ ] 8.0 Funcionalidade de Cadastro de Empresa (ingestão + endpoint)
+- [x] 8.0 Funcionalidade de Cadastro de Empresa (ingestão + endpoint)
 - [ ] 9.0 Funcionalidade de Busca (serviço compartilhado + endpoints WhatsApp e chat online)
 - [ ] 10.0 Integração da Aplicação e Tratamento de Erros (DI, rotas, exception handlers, E2E)

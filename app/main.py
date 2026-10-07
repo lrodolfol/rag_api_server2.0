@@ -9,7 +9,8 @@ from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 
-from app.api.routes import health
+from app.api.routes import health, registration
+from app.domain import InappropriateContentError
 from app.infrastructure.logging.logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -32,6 +33,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.include_router(health.router)
+    application.include_router(registration.router)
+    application.add_exception_handler(
+        InappropriateContentError,
+        registration.inappropriate_content_handler,
+    )
     return application
 
 
