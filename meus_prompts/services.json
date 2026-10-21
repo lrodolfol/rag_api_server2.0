@@ -1,0 +1,68 @@
+[
+    {
+        "user_code": "rodolfo12356",
+        "request": {
+            "name": "sabor_da_roca",
+            "descricao": "restaurante e comida caseira",
+            "email": "contato@sabordaroca.com.br",
+            "address": "rua das flores - 120",
+            "telephone": "35 9 91234567",
+            "detalhes": "O Sabor da Roça oferece refeições caseiras, marmitas, pratos executivos e comida típica mineira. Trabalhamos com entrega em domicílio e pedidos para retirada. Atendimento via WhatsApp."
+        }
+    },
+    {
+        "user_code": "rodolfo127533",
+        "request": {
+            "name": "techfix_informatica",
+            "descricao": "assistência técnica de informática",
+            "email": "suporte@techfix.com.br",
+            "address": "avenida brasil - 450",
+            "telephone": "35 9 92345678",
+            "detalhes": "A TechFix oferece manutenção de computadores e notebooks, formatação, instalação de programas, remoção de vírus, upgrades de hardware e montagem de computadores personalizados. Atendimento presencial e remoto."
+        }
+    },
+    {
+        "user_code": "rodolfo170523",
+        "request": {
+            "name": "bella_modas",
+            "descricao": "loja de roupas e acessórios",
+            "email": "vendas@bellamodas.com.br",
+            "address": "rua sete de setembro - 85",
+            "telephone": "35 9 93456789",
+            "detalhes": "A Bella Modas trabalha com roupas femininas, vestidos, calças, blusas, bolsas e acessórios. Oferecemos novidades semanais, opções de pagamento facilitado e entrega local. Pedidos e consultas de estoque pelo WhatsApp."
+        }
+    },
+    {
+        "user_code": "rodolfo1024523",
+        "request": {
+            "name": "prime_pinturas",
+            "descricao": "serviços de pintura e reforma",
+            "email": "contato@primepinturas.com.br",
+            "address": "rua dos trabalhadores - 230",
+            "telephone": "35 9 94567890",
+            "detalhes": "A Prime Pinturas realiza pintura residencial e comercial, pintura de fachadas, aplicação de texturas, acabamento de paredes e pequenos reparos. Trabalhamos com orçamento gratuito mediante avaliação e agendamento pelo WhatsApp."
+        }
+    },
+    {
+        "user_code": "rodolfo124963047823",
+        "request": {
+            "name": "pet_amigo",
+            "descricao": "pet shop e cuidados para animais",
+            "email": "atendimento@petamigo.com.br",
+            "address": "avenida das acacias - 310",
+            "telephone": "35 9 95678901",
+            "detalhes": "O Pet Amigo oferece banho e tosa, produtos para cães e gatos, rações, brinquedos, acessórios e itens de higiene animal. Também realizamos agendamentos para cuidados estéticos e orientamos os clientes sobre os produtos disponíveis. Atendimento via WhatsApp."
+        }
+    },
+    {
+        "user_code": "rodolfo123",
+        "request": {
+            "name": "ti-nos-negocios",
+            "descricao": "desenvolvimento e consultoria de software",
+            "email": "ceo@tnn.com.br",
+            "address": "rua marco simeao dutra - 646",
+            "telephone": "35 9 98509829",
+            "detalhes": "A TinosNegocios oferece serviços de consultoria em tecnologia e desenvolvimento de softwares personalizados, criando soluções inovadoras para otimizar processos, aumentar a produtividade e impulsionar o crescimento das empresas. atendimento via whatsapp e zoom"
+        }
+    }
+]

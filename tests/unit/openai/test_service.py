@@ -23,6 +23,7 @@ def _config() -> OpenAIConfig:
         model_embeddings="text-embedding-ada-002",
         model_chat="gpt-3.5-turbo",
         input_guide="responda com base no contexto",
+        pattern_response="Sem resposta disponível",
     )
 
 

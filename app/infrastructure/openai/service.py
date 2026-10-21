@@ -14,6 +14,7 @@ logged.
 """
 
 import json
+from tokenize import String
 from typing import Final
 
 from openai import AsyncOpenAI, OpenAIError
