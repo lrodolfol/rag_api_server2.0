@@ -20,10 +20,10 @@ from app.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
-MAX_MESSAGES_PER_WINDOW: Final[int] = 3
+MAX_MESSAGES_PER_WINDOW: Final[int] = -1
 WINDOW_TTL_SECONDS: Final[int] = 5 * 60 * 60
 RATE_LIMIT_MESSAGE: Final[str] = (
-    "Você atingiu o limite de mensagens. Tente novamente mais tarde."
+    "Você atingiu o limite de mensagens no chat online. Experimente nosso serviço no whatsapp ou tente novamente mais tarde."
 )
 
 
@@ -55,7 +55,7 @@ class InMemoryRateLimiter:
         async with self._lock:
             now = self._time_source()
             window = self._active_window(ip, now)
-            if window.count >= self._max_messages:
+            if self._max_messages != -1 and window.count >= self._max_messages:
                 logger.warning("Rate limit reached for an online chat client")
                 raise RateLimitError(RATE_LIMIT_MESSAGE)
             window.count += 1
