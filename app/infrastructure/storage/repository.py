@@ -1,17 +1,19 @@
-"""Asynchronous client-record storage over an S3 bucket.
+"""Asynchronous client-record storage over an AWS S3 bucket.
 
 Persists each client's registration as one line of a single JSONL object
-(``client_services.jsonl``) in the configured bucket. Updating a client is
-idempotent: the existing object is read, the line matching the client's
-``user_code`` is replaced (or appended when new), and the object is rewritten,
-so repeated registrations never accumulate duplicate records.
+(``client_services.jsonl``) in the ``acha-local`` S3 bucket (region
+``us-east-1``). Updating a client is idempotent: the existing object is read,
+the line matching the client's ``user_code`` is replaced (or appended when new),
+and the object is rewritten, so repeated registrations never accumulate duplicate
+records.
 
 The boto3 SDK is synchronous, so every blocking call is run in a worker thread
 via :func:`asyncio.to_thread` to honour the application's async contract without
-blocking the event loop. Bucket name and endpoint come from the typed
-:class:`BucketConfig` (never hardcoded); SDK failures are translated into the
-domain :class:`ClientStorageError`, and no client data (``user_code`` or record
-contents) is ever logged.
+blocking the event loop. Bucket name and AWS credentials come from the typed
+:class:`BucketConfig` which reads them from environment variables
+``CLOUD_ACCESS_KEY`` and ``CLOUD_SECRET_KEY`` (never hardcoded); SDK failures are
+translated into the domain :class:`ClientStorageError`, and no client data
+(``user_code`` or record contents) is ever logged.
 """
 
 import asyncio

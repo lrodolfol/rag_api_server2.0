@@ -40,7 +40,7 @@ class RedisHistoryRepository:
             raw_items = await self._client.lrange(key, 0, -1)
         except RedisError as error:
             logger.exception("Failed to read conversation history from Redis")
-            raise HistoryStoreError("Failed to read conversation history") from error
+            return []
         return [self._deserialize(item) for item in raw_items]
 
     async def append_message(
@@ -56,7 +56,6 @@ class RedisHistoryRepository:
             await self._client.expire(key, HISTORY_TTL_SECONDS)
         except RedisError as error:
             logger.exception("Failed to append conversation history to Redis")
-            raise HistoryStoreError("Failed to append conversation history") from error
 
     @staticmethod
     def _key(channel: HistoryChannel, user_code: str) -> str:

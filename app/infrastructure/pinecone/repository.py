@@ -17,7 +17,7 @@ logged.
 import asyncio
 from typing import Final
 
-from pinecone import Pinecone, ServerlessSpec
+from pinecone import NotFoundException, Pinecone, ServerlessSpec
 from pinecone.exceptions import PineconeException
 
 from app.domain import EmbeddingRecord, VectorRepositoryError
@@ -100,7 +100,11 @@ class PineconeVectorRepository:
     def _replace_vectors_sync(self, user_code: str, vectors: list[VectorTuple]) -> None:
         try:
             index = self._client.Index(self._config.index_name)
-            index.delete(filter={"user_code": user_code})
+
+            try:
+                index.delete(filter={"user_code": user_code})
+            except NotFoundException:
+                logger.warning(f"Namespace not found for delete user_code {user_code}. going ahead.")
             index.upsert(vectors=vectors)
         except PineconeException as error:
             logger.exception("Failed to upsert Pinecone vectors")
