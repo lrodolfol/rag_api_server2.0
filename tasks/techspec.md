@@ -100,7 +100,7 @@ def generate_chunks(texto: str): #instrução para LLM: colocar tipo de retorno
     def generate_vector_from_chunks(self, chunk) -> list[float]:
         response: CreateEmbeddingResponse = open_ai_client.embeddings.create(
             input=chunk,
-            model=self.model_embeddings #instrução para LLM: ´model_embeddings´ é uma parametro de configuração para text-embedding-ada-002
+            model=self.model_embeddings #instrução para LLM: ´model_embeddings´ é uma parametro de configuração para text-embedding-3-small
         )
 
         vector: list[float] = response.data[0].embedding

@@ -65,7 +65,8 @@ class OpenAIService:
         """Generate the embedding vector for an isolated question."""
         if not question.strip():
             return []
-        return await self._generate_vector(question)
+        enriched = f"{self._config.query_prefix}{question}" if self._config.query_prefix else question
+        return await self._generate_vector(enriched)
 
     async def generate_chat_answer(
         self, payload: PayloadQuestionOpenIA, phrases: list[str]

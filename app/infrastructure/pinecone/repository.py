@@ -27,7 +27,7 @@ from app.infrastructure.pinecone.models import VectorMatch
 
 logger = get_logger(__name__)
 
-SIMILARITY_THRESHOLD: Final[float] = 0.9
+SIMILARITY_THRESHOLD: Final[float] = 0.8
 DEFAULT_TOP_K: Final[int] = 5
 CLOUD_PROVIDER: Final[str] = "aws"
 VectorTuple = tuple[str, list[float], dict[str, str]]
@@ -76,6 +76,7 @@ class PineconeVectorRepository:
         if not embedding:
             return []
         await self.create_index_if_not_exists()
+
         response = await asyncio.to_thread(self._query_sync, embedding, top_k)
         return self._filter_matches(response)
 

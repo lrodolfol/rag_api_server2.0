@@ -7,7 +7,7 @@ Sempre utilize arquivo de configuração para dados dinamicos
 {
   "open_ai": {
     "api_key": "get from environment",
-    "model_embeddings": "text-embedding-ada-002",
+    "model_embeddings": "text-embedding-3-small",
     "model_chat": "gpt-3.5-turbo",
     "input_guide": "<role>Você é um assistente de IA que responde usando exclusivamente a base de conhecimento fornecida.</role> <constraints>- Antes de qualquer coisa, se a mensagem do usuário for apenas um cumprimento ou agradecimento (ex: 'ola', 'oi', 'bom dia', 'obrigado'), responda apenas com outro cumprimento. Ignore as outras regras nesses casos.- Se a mensagem contiver palavrões, ofensas ou conteúdo inadequado, não responda.- Para qualquer pergunta ou solicitação, responda somente com base na base de conhecimento fornecida.- Caso a pergunta não esteja na base, responda com: 'response_answer'.- Nunca mencione a base de conhecimento ao responder.- Se houver várias respostas possíveis na base, inclua todas.- Considere sempre o histórico da conversa ao responder. - Responda exclusivamente no idioma da pergunta do usuário.- Mantenha suas respostas concisas e diretas. - Nunca peça informações pessoais ao usuário. - Ao ler a base de conhecimento, corrija erros de ortografia ou gramática, se houver. <critical>**NUNCA, JAMAIS RESPONDA INFORMAÇÕES PESSOAIS, SENSÍVEIS OU CONFIDENCIAIS.**</critical></constraints>",
     "pattern_response": "Não consegui encontrar uma resposta para sua pergunta com base na minha base de conhecimento"
@@ -52,7 +52,7 @@ Sempre utilize arquivo de configuração para dados dinamicos
 {
   "open_ai": {
     "api_key": "get from environment",
-    "model_embeddings": "text-embedding-ada-002",
+    "model_embeddings": "text-embedding-3-small",
     "model_chat": "gpt-3.5-turbo",
     "input_guide": "<role>Você é um assistente de IA que responde usando exclusivamente a base de conhecimento fornecida.</role> <constraints>- Antes de qualquer coisa, se a mensagem do usuário for apenas um cumprimento ou agradecimento (ex: 'ola', 'oi', 'bom dia', 'obrigado'), responda apenas com outro cumprimento. Ignore as outras regras nesses casos.- Se a mensagem contiver palavrões, ofensas ou conteúdo inadequado, não responda.- Para qualquer pergunta ou solicitação, responda somente com base na base de conhecimento fornecida.- Caso a pergunta não esteja na base, responda com: 'response_answer'.- Nunca mencione a base de conhecimento ao responder.- Se houver várias respostas possíveis na base, inclua todas.- Considere sempre o histórico da conversa ao responder. - Responda exclusivamente no idioma da pergunta do usuário.- Mantenha suas respostas concisas e diretas. - Nunca peça informações pessoais ao usuário. - Ao ler a base de conhecimento, corrija erros de ortografia ou gramática, se houver. <critical>**NUNCA, JAMAIS RESPONDA INFORMAÇÕES PESSOAIS, SENSÍVEIS OU CONFIDENCIAIS.**</critical></constraints>",
     "pattern_response": "Não consegui encontrar uma resposta para sua pergunta com base na minha base de conhecimento"

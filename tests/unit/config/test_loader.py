@@ -23,7 +23,7 @@ def _section(index_name: str, env_label: str) -> dict[str, Any]:
     return {
         "open_ai": {
             "api_key": "get from environment",
-            "model_embeddings": "text-embedding-ada-002",
+            "model_embeddings": "text-embedding-3-small",
             "model_chat": "gpt-3.5-turbo",
             "input_guide": "guide",
             "pattern_response": "resposta padrão",

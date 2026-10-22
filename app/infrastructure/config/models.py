@@ -23,6 +23,7 @@ class OpenAIConfig(BaseModel):
     model_chat: str
     input_guide: str
     pattern_response: str
+    query_prefix: str = ""
 
     @model_validator(mode="after")
     def _substitute_pattern_response(self) -> "OpenAIConfig":

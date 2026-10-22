@@ -20,7 +20,7 @@ from app.infrastructure.openai import ModerationResult, OpenAIService
 def _config() -> OpenAIConfig:
     return OpenAIConfig(
         api_key=SecretStr("test-key"),
-        model_embeddings="text-embedding-ada-002",
+        model_embeddings="text-embedding-3-small",
         model_chat="gpt-3.5-turbo",
         input_guide="responda com base no contexto",
         pattern_response="Sem resposta disponível",
@@ -214,6 +214,52 @@ async def test_should_raise_when_chat_answer_is_empty() -> None:
     # Act / Assert
     with pytest.raises(OpenIaException):
         await _service_with(client).generate_chat_answer(payload, [])
+
+
+@pytest.mark.asyncio
+async def test_should_prepend_query_prefix_to_question() -> None:
+    # Arrange
+    client = MagicMock()
+    client.embeddings.create = AsyncMock(return_value=_embedding_response([0.5, 0.6]))
+    config = OpenAIConfig(
+        api_key=SecretStr("test-key"),
+        model_embeddings="text-embedding-3-small",
+        model_chat="gpt-3.5-turbo",
+        input_guide="guia",
+        pattern_response="sem resposta",
+        query_prefix="Busca por serviço: ",
+    )
+    service = OpenAIService(client=client, config=config)
+
+    # Act
+    await service.generate_embedding_for_question("onde comer?")
+
+    # Assert
+    call = client.embeddings.create.await_args
+    assert call.kwargs["input"] == "Busca por serviço: onde comer?"
+
+
+@pytest.mark.asyncio
+async def test_should_not_prepend_empty_query_prefix() -> None:
+    # Arrange
+    client = MagicMock()
+    client.embeddings.create = AsyncMock(return_value=_embedding_response([0.5, 0.6]))
+    config = OpenAIConfig(
+        api_key=SecretStr("test-key"),
+        model_embeddings="text-embedding-3-small",
+        model_chat="gpt-3.5-turbo",
+        input_guide="guia",
+        pattern_response="sem resposta",
+        query_prefix="",
+    )
+    service = OpenAIService(client=client, config=config)
+
+    # Act
+    await service.generate_embedding_for_question("onde comer?")
+
+    # Assert
+    call = client.embeddings.create.await_args
+    assert call.kwargs["input"] == "onde comer?"
 
 
 @pytest.mark.asyncio
