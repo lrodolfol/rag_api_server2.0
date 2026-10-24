@@ -20,7 +20,7 @@ from app.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
-MAX_MESSAGES_PER_WINDOW: Final[int] = -1
+MAX_MESSAGES_PER_WINDOW: Final[int] = 3
 WINDOW_TTL_SECONDS: Final[int] = 5 * 60 * 60
 RATE_LIMIT_MESSAGE: Final[str] = (
     "Você atingiu o limite de mensagens no chat online. Experimente nosso serviço no whatsapp ou tente novamente mais tarde."

@@ -10,7 +10,11 @@ from pydantic import SecretStr
 
 from app.domain import EmbeddingRecord, VectorRepositoryError
 from app.infrastructure.config import PineconeConfig
-from app.infrastructure.pinecone import PineconeVectorRepository, VectorMatch
+from app.infrastructure.pinecone import (
+    SIMILARITY_THRESHOLD,
+    PineconeVectorRepository,
+    VectorMatch,
+)
 
 
 def _config() -> PineconeConfig:
@@ -248,9 +252,11 @@ async def test_should_wrap_provider_error_when_checking_vectors() -> None:
 @pytest.mark.asyncio
 async def test_should_return_only_matches_above_threshold() -> None:
     # Arrange
+    below = SIMILARITY_THRESHOLD - 0.01
+    above = SIMILARITY_THRESHOLD + 0.01
     index = MagicMock()
     index.query.return_value = SimpleNamespace(
-        matches=[_match(0.95), _match(0.9), _match(0.89), _match(0.999)]
+        matches=[_match(0.99), _match(below), _match(SIMILARITY_THRESHOLD), _match(above)]
     )
     client = _client_with_index(index)
 
@@ -258,7 +264,7 @@ async def test_should_return_only_matches_above_threshold() -> None:
     results = await _repository(client).query([0.1, 0.2], top_k=4)
 
     # Assert
-    assert [round(match.score, 3) for match in results] == [0.95, 0.999]
+    assert [match.score for match in results] == [0.99, above]
     index.query.assert_called_once_with(
         vector=[0.1, 0.2], top_k=4, include_metadata=True
     )

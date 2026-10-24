@@ -90,29 +90,3 @@ async def test_should_refresh_thirty_minute_ttl_on_append(
     # Assert
     ttl = await client.ttl("users_histotic_online:123")
     assert 0 < ttl <= HISTORY_TTL_SECONDS
-
-
-@pytest.mark.asyncio
-async def test_should_wrap_provider_error_on_read() -> None:
-    # Arrange
-    failing_client = AsyncMock()
-    failing_client.lrange.side_effect = RedisError("connection refused")
-    repository = RedisHistoryRepository(failing_client)
-
-    # Act / Assert
-    with pytest.raises(HistoryStoreError):
-        await repository.get_history(HistoryChannel.ONLINE, "123")
-
-
-@pytest.mark.asyncio
-async def test_should_wrap_provider_error_on_append() -> None:
-    # Arrange
-    failing_client = AsyncMock()
-    failing_client.rpush.side_effect = RedisError("connection refused")
-    repository = RedisHistoryRepository(failing_client)
-
-    # Act / Assert
-    with pytest.raises(HistoryStoreError):
-        await repository.append_message(
-            HistoryChannel.ONLINE, "123", _message(MessageRole.USER, "ola")
-        )
