@@ -25,8 +25,6 @@ def _section(index_name: str, env_label: str) -> dict[str, Any]:
             "api_key": "get from environment",
             "model_embeddings": "text-embedding-3-small",
             "model_chat": "gpt-3.5-turbo",
-            "input_guide": "guide",
-            "pattern_response": "resposta padrão",
         },
         "pinecone": {
             "api_key": "get from environment",
@@ -257,21 +255,3 @@ def test_should_cache_config_and_not_reread_file(
     assert second.pinecone.index_name == "acha-local-services-dev"
 
 
-def test_should_substitute_pattern_response_in_input_guide(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None
-) -> None:
-    # Arrange
-    section = _section("acha-local-services-dev", "development")
-    section["open_ai"]["input_guide"] = "responda: 'response_answer'."
-    section["open_ai"]["pattern_response"] = "Sem resposta disponível"
-    data = {"dev": section}
-    config_path = _write_config(tmp_path / "env.json", data)
-    monkeypatch.setenv("ENVIRONMENT", "dev")
-    monkeypatch.setenv("CONFIG_FILE", str(config_path))
-
-    # Act
-    config = get_config()
-
-    # Assert
-    assert config.open_ai.input_guide == "responda: Sem resposta disponível."
-    assert "response_answer" not in config.open_ai.input_guide

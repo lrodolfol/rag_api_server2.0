@@ -8,10 +8,12 @@ from openai import OpenAIError
 from pydantic import SecretStr
 
 from app.domain import (
+    INPUT_GUIDE,
     MessageHistoryItem,
     MessageRole,
     OpenIaException,
     PayloadQuestionOpenIA,
+    QUERY_PREFIX,
 )
 from app.infrastructure.config import OpenAIConfig
 from app.infrastructure.openai import ModerationResult, OpenAIService
@@ -22,8 +24,6 @@ def _config() -> OpenAIConfig:
         api_key=SecretStr("test-key"),
         model_embeddings="text-embedding-3-small",
         model_chat="gpt-3.5-turbo",
-        input_guide="responda com base no contexto",
-        pattern_response="Sem resposta disponível",
     )
 
 
@@ -181,7 +181,7 @@ async def test_should_build_chat_input_with_guide_history_and_matches() -> None:
     # Assert
     call = client.responses.create.await_args
     sent = call.kwargs["input"]
-    assert sent[0] == {"role": "system", "content": "responda com base no contexto"}
+    assert sent[0] == {"role": "system", "content": INPUT_GUIDE}
     assert sent[1] == {"role": "user", "content": "onde comer?"}
     assert sent[2] == {"role": "assistant", "content": "varios lugares"}
     assert sent[3] == {"role": "user", "content": "Pergunta: e sobremesa?"}
@@ -221,45 +221,13 @@ async def test_should_prepend_query_prefix_to_question() -> None:
     # Arrange
     client = MagicMock()
     client.embeddings.create = AsyncMock(return_value=_embedding_response([0.5, 0.6]))
-    config = OpenAIConfig(
-        api_key=SecretStr("test-key"),
-        model_embeddings="text-embedding-3-small",
-        model_chat="gpt-3.5-turbo",
-        input_guide="guia",
-        pattern_response="sem resposta",
-        query_prefix="Busca por serviço: ",
-    )
-    service = OpenAIService(client=client, config=config)
 
     # Act
-    await service.generate_embedding_for_question("onde comer?")
+    await _service_with(client).generate_embedding_for_question("onde comer?")
 
     # Assert
     call = client.embeddings.create.await_args
-    assert call.kwargs["input"] == "Busca por serviço: onde comer?"
-
-
-@pytest.mark.asyncio
-async def test_should_not_prepend_empty_query_prefix() -> None:
-    # Arrange
-    client = MagicMock()
-    client.embeddings.create = AsyncMock(return_value=_embedding_response([0.5, 0.6]))
-    config = OpenAIConfig(
-        api_key=SecretStr("test-key"),
-        model_embeddings="text-embedding-3-small",
-        model_chat="gpt-3.5-turbo",
-        input_guide="guia",
-        pattern_response="sem resposta",
-        query_prefix="",
-    )
-    service = OpenAIService(client=client, config=config)
-
-    # Act
-    await service.generate_embedding_for_question("onde comer?")
-
-    # Assert
-    call = client.embeddings.create.await_args
-    assert call.kwargs["input"] == "onde comer?"
+    assert call.kwargs["input"] == f"{QUERY_PREFIX}onde comer?"
 
 
 @pytest.mark.asyncio

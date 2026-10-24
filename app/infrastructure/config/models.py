@@ -8,11 +8,7 @@ Secrets use ``pydantic.SecretStr`` so their values are masked in logs, ``repr``
 and tracebacks, preventing accidental leakage of sensitive data.
 """
 
-from typing import Final
-
-from pydantic import BaseModel, SecretStr, model_validator
-
-_RESPONSE_PLACEHOLDER: Final[str] = "'response_answer'"
+from pydantic import BaseModel, SecretStr
 
 
 class OpenAIConfig(BaseModel):
@@ -21,16 +17,6 @@ class OpenAIConfig(BaseModel):
     api_key: SecretStr
     model_embeddings: str
     model_chat: str
-    input_guide: str
-    pattern_response: str
-    query_prefix: str = ""
-
-    @model_validator(mode="after")
-    def _substitute_pattern_response(self) -> "OpenAIConfig":
-        self.input_guide = self.input_guide.replace(
-            _RESPONSE_PLACEHOLDER, self.pattern_response
-        )
-        return self
 
 
 class PineconeConfig(BaseModel):

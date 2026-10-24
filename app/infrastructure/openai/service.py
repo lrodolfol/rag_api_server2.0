@@ -19,7 +19,7 @@ from typing import Final
 
 from openai import AsyncOpenAI, OpenAIError
 
-from app.domain import EmbeddingRecord, OpenIaException, PayloadQuestionOpenIA
+from app.domain import EmbeddingRecord, INPUT_GUIDE, OpenIaException, PayloadQuestionOpenIA, QUERY_PREFIX
 from app.infrastructure.config import OpenAIConfig
 from app.infrastructure.logging.logger import get_logger
 from app.infrastructure.openai.models import ModerationResult
@@ -65,7 +65,7 @@ class OpenAIService:
         """Generate the embedding vector for an isolated question."""
         if not question.strip():
             return []
-        enriched = f"{self._config.query_prefix}{question}" if self._config.query_prefix else question
+        enriched = f"{QUERY_PREFIX}{question}" if QUERY_PREFIX else question
         return await self._generate_vector(enriched)
 
     async def generate_chat_answer(
@@ -103,7 +103,7 @@ class OpenAIService:
         self, payload: PayloadQuestionOpenIA, phrases: list[str]
     ) -> list[ChatMessage]:
         return [
-            {"role": "system", "content": self._config.input_guide},
+            {"role": "system", "content": INPUT_GUIDE},
             *self._build_history(payload),
             {"role": "user", "content": f"Pergunta: {payload.question}"},
             {"role": "system", "content": f"Trechos: {phrases}"},

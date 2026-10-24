@@ -21,6 +21,7 @@ from app.domain.exceptions import (
     RateLimitError,
     VectorRepositoryError,
 )
+from app.domain.prompts import INPUT_GUIDE, PATTERN_RESPONSE, QUERY_PREFIX
 from app.domain.search import OnlineChatSearchPayload, WhatsAppSearchPayload
 
 __all__ = [
@@ -31,11 +32,14 @@ __all__ = [
     "EmbeddingRecord",
     "HistoryStoreError",
     "InappropriateContentError",
+    "INPUT_GUIDE",
     "MessageHistoryItem",
     "MessageRole",
     "OnlineChatSearchPayload",
     "OpenIaException",
+    "PATTERN_RESPONSE",
     "PayloadQuestionOpenIA",
+    "QUERY_PREFIX",
     "RateLimitError",
     "VectorRepositoryError",
     "WhatsAppSearchPayload",
