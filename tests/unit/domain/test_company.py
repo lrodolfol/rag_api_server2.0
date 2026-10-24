@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.domain import CompanyData, CompanyRegistrationRequest
+from app.domain import CompanyData, CompanyDeletionRequest, CompanyRegistrationRequest
 
 
 def _valid_company_payload() -> dict:
@@ -66,3 +66,18 @@ def test_should_reject_empty_user_code() -> None:
     # Act / Assert
     with pytest.raises(ValidationError):
         CompanyRegistrationRequest.model_validate(payload)
+
+
+def test_should_accept_deletion_request_with_user_code() -> None:
+    # Act
+    request = CompanyDeletionRequest.model_validate({"user_code": "123"})
+
+    # Assert
+    assert request.user_code == "123"
+
+
+@pytest.mark.parametrize("payload", [{}, {"user_code": ""}])
+def test_should_reject_deletion_request_without_valid_user_code(payload: dict) -> None:
+    # Act / Assert
+    with pytest.raises(ValidationError):
+        CompanyDeletionRequest.model_validate(payload)

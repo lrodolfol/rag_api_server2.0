@@ -9,6 +9,7 @@ stable import point without the domain layer learning about FastAPI. The shared
 from app.api.patterns.response import ApiResponse
 from app.domain import (
     CompanyData,
+    CompanyDeletionRequest,
     CompanyRegistrationRequest,
     OnlineChatSearchPayload,
     WhatsAppSearchPayload,
@@ -17,6 +18,7 @@ from app.domain import (
 __all__ = [
     "ApiResponse",
     "CompanyData",
+    "CompanyDeletionRequest",
     "CompanyRegistrationRequest",
     "OnlineChatSearchPayload",
     "WhatsAppSearchPayload",

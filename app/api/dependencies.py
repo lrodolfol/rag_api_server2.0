@@ -8,6 +8,7 @@ request, and configuration is read lazily (on first use) rather than at import.
 
 from functools import lru_cache
 
+from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
 from app.infrastructure.config import AppConfig, get_config
@@ -59,6 +60,14 @@ def get_registration_service() -> RegistrationService:
     """Provide the registration service wired with its infrastructure deps."""
     return RegistrationService(
         openai_service=_openai_service(),
+        vector_repository=_vector_repository(),
+        storage_repository=_storage_repository(),
+    )
+
+
+def get_deletion_service() -> DeletionService:
+    """Provide the company deletion service wired with its infrastructure deps."""
+    return DeletionService(
         vector_repository=_vector_repository(),
         storage_repository=_storage_repository(),
     )

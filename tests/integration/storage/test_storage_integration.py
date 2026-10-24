@@ -114,6 +114,52 @@ async def test_should_replace_record_on_client_update() -> None:
 
 
 @pytest.mark.asyncio
+async def test_should_remove_only_deleted_client_record() -> None:
+    # Arrange
+    client = _FakeS3Client()
+    repository = ClientStorageRepository(client=client, config=_config())
+    await repository.save_client(_registration("123", "Padaria"))
+    await repository.save_client(_registration("456", "Floricultura"))
+
+    # Act
+    await repository.delete_client("123")
+
+    # Assert
+    records = _stored_records(client)
+    assert [record["user_code"] for record in records] == ["456"]
+
+
+@pytest.mark.asyncio
+async def test_should_be_idempotent_when_deleting_twice() -> None:
+    # Arrange
+    client = _FakeS3Client()
+    repository = ClientStorageRepository(client=client, config=_config())
+    await repository.save_client(_registration("123", "Padaria"))
+
+    # Act
+    await repository.delete_client("123")
+    await repository.delete_client("123")
+
+    # Assert
+    assert _stored_records(client) == []
+
+
+@pytest.mark.asyncio
+async def test_should_allow_saving_again_after_deleting_last_record() -> None:
+    # Arrange
+    client = _FakeS3Client()
+    repository = ClientStorageRepository(client=client, config=_config())
+    await repository.save_client(_registration("123", "Padaria"))
+    await repository.delete_client("123")
+
+    # Act
+    await repository.save_client(_registration("789", "Mercado"))
+
+    # Assert
+    assert [record["user_code"] for record in _stored_records(client)] == ["789"]
+
+
+@pytest.mark.asyncio
 async def test_should_build_real_client_without_network_call() -> None:
     # Act
     client = create_s3_client(_config())

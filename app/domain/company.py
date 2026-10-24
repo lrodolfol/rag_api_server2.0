@@ -25,3 +25,9 @@ class CompanyRegistrationRequest(BaseModel):
 
     user_code: str = Field(min_length=1)
     request: CompanyData
+
+
+class CompanyDeletionRequest(BaseModel):
+    """Request to delete every stored record of a client."""
+
+    user_code: str = Field(min_length=1)

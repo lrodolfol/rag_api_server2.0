@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from pinecone import NotFoundException
 from pinecone.exceptions import PineconeException
 from pydantic import SecretStr
 
@@ -156,6 +157,92 @@ async def test_should_wrap_provider_error_on_delete() -> None:
     # Act / Assert
     with pytest.raises(VectorRepositoryError):
         await _repository(client).delete_by_user_code("987")
+
+
+@pytest.mark.asyncio
+async def test_should_ignore_not_found_on_delete() -> None:
+    # Arrange
+    index = MagicMock()
+    index.delete.side_effect = NotFoundException(status=404, reason="Not Found")
+    client = _client_with_index(index)
+
+    # Act
+    await _repository(client).delete_by_user_code("987")
+
+    # Assert
+    index.delete.assert_called_once_with(filter={"user_code": "987"})
+
+
+@pytest.mark.asyncio
+async def test_should_report_vectors_exist_when_filtered_query_has_match() -> None:
+    # Arrange
+    index = MagicMock()
+    index.query.return_value = SimpleNamespace(matches=[_match(0.01)])
+    client = _client_with_index(index)
+
+    # Act
+    found = await _repository(client).has_vectors_for_user_code("987")
+
+    # Assert
+    assert found is True
+
+
+@pytest.mark.asyncio
+async def test_should_report_no_vectors_when_filtered_query_is_empty() -> None:
+    # Arrange
+    index = MagicMock()
+    index.query.return_value = SimpleNamespace(matches=[])
+    client = _client_with_index(index)
+
+    # Act
+    found = await _repository(client).has_vectors_for_user_code("987")
+
+    # Assert
+    assert found is False
+
+
+@pytest.mark.asyncio
+async def test_should_check_vectors_with_user_code_filter_and_configured_dimension() -> None:
+    # Arrange
+    index = MagicMock()
+    index.query.return_value = SimpleNamespace(matches=[])
+    client = _client_with_index(index)
+
+    # Act
+    await _repository(client).has_vectors_for_user_code("987")
+
+    # Assert
+    kwargs = index.query.call_args.kwargs
+    assert kwargs["filter"] == {"user_code": "987"}
+    assert kwargs["top_k"] == 1
+    assert len(kwargs["vector"]) == 1536
+    assert any(value != 0 for value in kwargs["vector"])
+
+
+@pytest.mark.asyncio
+async def test_should_report_no_vectors_when_index_not_found() -> None:
+    # Arrange
+    index = MagicMock()
+    index.query.side_effect = NotFoundException(status=404, reason="Not Found")
+    client = _client_with_index(index)
+
+    # Act
+    found = await _repository(client).has_vectors_for_user_code("987")
+
+    # Assert
+    assert found is False
+
+
+@pytest.mark.asyncio
+async def test_should_wrap_provider_error_when_checking_vectors() -> None:
+    # Arrange
+    index = MagicMock()
+    index.query.side_effect = PineconeException("provider down")
+    client = _client_with_index(index)
+
+    # Act / Assert
+    with pytest.raises(VectorRepositoryError):
+        await _repository(client).has_vectors_for_user_code("987")
 
 
 @pytest.mark.asyncio

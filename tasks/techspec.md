@@ -23,6 +23,13 @@
     API -> 3.5 - pega o retorno das similaridades e faz pergunta para a openAI
     API -> 3.6 - pega o retorno da openAI para devolver a resposta para o usuário    
 
+4- Cliente -> solicita a exclusão dos seus dados pela API
+    API -> 4.1 - verifica se o `user_code` possui vetores no pinecone
+    API -> 4.2 - se não possuir, não faz nada e responde com sucesso
+    API -> 4.3 - se possuir, exclui os vetores do cliente no pinecone
+    API -> 4.4 - remove o registro do cliente do arquivo jsonl no bucket S3
+    API -> 4.5 - responde com o padrão de resposta da API
+
 ## Formas de código:
 
 1. Deverá vir o código do cliente e os dados da empresa.
@@ -357,6 +364,40 @@ os parametros devem vir do arquivo de configurações {env.json}
 ```        
 
 3.6 use o padrão de resposta de API conforme `@.agents\code_patterns\api.md`
+
+
+4.
+Exclusão de empresa/serviço: `DELETE /companies`
+```json
+{
+    "user_code": "rodolfo12301"
+}
+```
+
+Respostas (padrão de API conforme `@.agents\code_patternspi.md`):
+- `200` — exclusão concluída, ou nenhum registro encontrado para o `user_code` (nada é alterado)
+- `422` — body inválido (sem `user_code` ou com `user_code` vazio)
+- `500` — erro interno (pinecone ou bucket), sem expor detalhes ao cliente
+
+```json
+{
+    "status_code": 200,
+    "message": "Company deleted successfully",
+    "errors": []
+}
+```
+
+4.1 a verificação usa uma consulta no pinecone com filtro de metadata `{"user_code": user_code}` e `top_k=1`.
+Os ids dos vetores seguem o formato `{empresa}-{user_code}-{i}`, então não é possível listar por prefixo de `user_code`.
+A consulta exige um vetor: envie um vetor não-zero com a `dimension` do arquivo de configurações (índices `cosine` rejeitam vetor zerado).
+O limite de similaridade **não** é aplicado nessa verificação.
+
+4.3 exclua os vetores com `index.delete(filter={"user_code": user_code})` (mesmo padrão do item 1.6). `NotFoundException` deve ser tratado como "nada para excluir".
+
+4.4 leia o arquivo `client_services.jsonl`, remova as linhas com o `user_code` e regrave o arquivo somente se alguma linha foi removida.
+Se o objeto não existir ou o cliente não estiver no arquivo, não faça nada.
+
+4.5 nunca registre o `user_code` nos logs.
 
 
 **OS CÓDIGOS ACIMA SÃO EXEMPLOS DE CÓDIGO, MELHORE OU APERFEIÇOE ELES, SE NECESSÁRIO**

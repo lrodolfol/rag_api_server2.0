@@ -4,6 +4,7 @@ Provides the vector-store operations the RAG pipeline needs:
 
 * create the index on demand (only when it does not already exist),
 * replace a client's vectors on update (delete by ``user_code`` then upsert),
+* check whether a client has any vector (metadata filter on ``user_code``),
 * query by embedding and return only matches above the similarity threshold.
 
 Index parameters always come from the typed :class:`PineconeConfig` (never
@@ -63,6 +64,22 @@ class PineconeVectorRepository:
         await asyncio.to_thread(self._replace_vectors_sync, user_code, vectors)
         logger.info("Upserted %d vectors into index '%s'", len(vectors), self._config.index_name)
 
+    async def has_vectors_for_user_code(self, user_code: str) -> bool:
+        """Return whether at least one vector is stored for ``user_code``.
+
+        Pinecone queries require a vector, so a neutral non-zero probe of the
+        configured dimension is sent and only the metadata filter decides the
+        result; the similarity threshold is deliberately not applied.
+        """
+        await self.create_index_if_not_exists()
+        found = await asyncio.to_thread(self._has_vectors_sync, user_code)
+        logger.info(
+            "Vector existence check on index '%s' found vectors: %s",
+            self._config.index_name,
+            found,
+        )
+        return found
+
     async def delete_by_user_code(self, user_code: str) -> None:
         """Delete every vector whose metadata matches ``user_code``."""
         await self.create_index_if_not_exists()
@@ -117,9 +134,28 @@ class PineconeVectorRepository:
         try:
             index = self._client.Index(self._config.index_name)
             index.delete(filter={"user_code": user_code})
+        except NotFoundException:
+            logger.warning("No vectors found to delete in index '%s'", self._config.index_name)
         except PineconeException as error:
             logger.exception("Failed to delete Pinecone vectors")
             raise VectorRepositoryError("Failed to delete vectors") from error
+
+    def _has_vectors_sync(self, user_code: str) -> bool:
+        probe = [1.0] * self._config.dimension
+        try:
+            index = self._client.Index(self._config.index_name)
+            response = index.query(
+                vector=probe,
+                top_k=1,
+                filter={"user_code": user_code},
+                include_metadata=False,
+            )
+        except NotFoundException:
+            return False
+        except PineconeException as error:
+            logger.exception("Failed to check Pinecone vectors")
+            raise VectorRepositoryError("Failed to check vectors") from error
+        return bool(getattr(response, "matches", None))
 
     def _query_sync(self, embedding: list[float], top_k: int) -> object:
         try:

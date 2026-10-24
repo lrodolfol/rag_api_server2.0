@@ -11,10 +11,12 @@ external provider is contacted.
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
+    get_deletion_service,
     get_rate_limiter,
     get_registration_service,
     get_search_service,
 )
+from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
 from app.domain import (
@@ -82,6 +84,12 @@ class _FakeVectorRepository:
             raise VectorRepositoryError("Failed to query vectors")
         return self._matches
 
+    async def has_vectors_for_user_code(self, user_code: str) -> bool:
+        return any(upsert[1] == user_code for upsert in self.upserts)
+
+    async def delete_by_user_code(self, user_code: str) -> None:
+        self.upserts = [upsert for upsert in self.upserts if upsert[1] != user_code]
+
 
 class _FakeStorageRepository:
     """In-memory stand-in for the S3 client-record store."""
@@ -91,6 +99,9 @@ class _FakeStorageRepository:
 
     async def save_client(self, registration: CompanyRegistrationRequest) -> None:
         self.saved.append(registration)
+
+    async def delete_client(self, user_code: str) -> None:
+        self.saved = [item for item in self.saved if item.user_code != user_code]
 
 
 class _FakeHistoryRepository:
@@ -172,6 +183,54 @@ def test_e2e_should_reject_inappropriate_registration_without_persisting() -> No
     assert "inappropriate_content" in response.json()["errors"]
     assert vectors.upserts == []
     assert storage.saved == []
+
+
+# --- Deletion flow -----------------------------------------------------------
+
+
+def test_e2e_should_register_then_delete_company_through_real_services() -> None:
+    # Arrange: real registration and deletion services sharing fake external deps.
+    vectors = _FakeVectorRepository()
+    storage = _FakeStorageRepository()
+    registration = RegistrationService(
+        openai_service=_FakeOpenAIService(),
+        vector_repository=vectors,
+        storage_repository=storage,
+    )
+    deletion = DeletionService(vector_repository=vectors, storage_repository=storage)
+    app = create_app()
+    app.dependency_overrides[get_registration_service] = lambda: registration
+    app.dependency_overrides[get_deletion_service] = lambda: deletion
+    client = TestClient(app)
+    client.post("/companies", json=_registration_payload("123"))
+    client.post("/companies", json=_registration_payload("456", "Floricultura"))
+
+    # Act
+    response = client.request("DELETE", "/companies", json={"user_code": "123"})
+
+    # Assert: only the target client's vectors and record were removed.
+    assert response.status_code == 200
+    assert response.json()["status_code"] == 200
+    assert [upsert[1] for upsert in vectors.upserts] == ["456"]
+    assert [item.user_code for item in storage.saved] == ["456"]
+
+
+def test_e2e_should_return_ok_when_deleting_unknown_company() -> None:
+    # Arrange: nothing registered for the requested client.
+    storage = _FakeStorageRepository()
+    deletion = DeletionService(
+        vector_repository=_FakeVectorRepository(), storage_repository=storage
+    )
+    app = create_app()
+    app.dependency_overrides[get_deletion_service] = lambda: deletion
+    client = TestClient(app)
+
+    # Act
+    response = client.request("DELETE", "/companies", json={"user_code": "999"})
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["errors"] == []
 
 
 # --- WhatsApp search flow ----------------------------------------------------

@@ -5,7 +5,11 @@ package must stay free of framework and infrastructure dependencies (FastAPI,
 boto3, HTTP/provider clients) so the domain remains independently testable.
 """
 
-from app.domain.company import CompanyData, CompanyRegistrationRequest
+from app.domain.company import (
+    CompanyData,
+    CompanyDeletionRequest,
+    CompanyRegistrationRequest,
+)
 from app.domain.conversation import (
     MessageHistoryItem,
     MessageRole,
@@ -27,6 +31,7 @@ from app.domain.search import OnlineChatSearchPayload, WhatsAppSearchPayload
 __all__ = [
     "ClientStorageError",
     "CompanyData",
+    "CompanyDeletionRequest",
     "CompanyRegistrationRequest",
     "DomainError",
     "EmbeddingRecord",

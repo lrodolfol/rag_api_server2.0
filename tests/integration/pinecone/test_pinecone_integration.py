@@ -48,7 +48,14 @@ class _FakeIndex:
         for vector_id, values, metadata in vectors:
             self.store[vector_id] = {"values": values, "metadata": metadata}
 
-    def query(self, *, vector: list[float], top_k: int, include_metadata: bool):
+    def query(
+        self,
+        *,
+        vector: list[float],
+        top_k: int,
+        include_metadata: bool,
+        filter: dict | None = None,
+    ):
         scored = [
             SimpleNamespace(
                 id=vector_id,
@@ -56,6 +63,8 @@ class _FakeIndex:
                 metadata=payload["metadata"] if include_metadata else None,
             )
             for vector_id, payload in self.store.items()
+            if not filter
+            or payload["metadata"].get("user_code") == filter.get("user_code")
         ]
         scored.sort(key=lambda match: match.score, reverse=True)
         return SimpleNamespace(matches=scored[:top_k])
@@ -156,6 +165,42 @@ async def test_should_remove_vectors_with_delete_by_user_code() -> None:
 
     # Assert
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_should_check_existence_then_delete_only_target_user_code() -> None:
+    # Arrange
+    client = _FakeClient()
+    repository = PineconeVectorRepository(client=client, config=_config())
+    await repository.upsert_company_vectors(
+        "Padaria", "123", [EmbeddingRecord(text="padaria", vector=[1.0, 0.0])]
+    )
+    await repository.upsert_company_vectors(
+        "Floricultura", "456", [EmbeddingRecord(text="flores", vector=[0.0, 1.0])]
+    )
+
+    # Act
+    found_before = await repository.has_vectors_for_user_code("123")
+    await repository.delete_by_user_code("123")
+    found_after = await repository.has_vectors_for_user_code("123")
+
+    # Assert
+    assert found_before is True
+    assert found_after is False
+    assert await repository.has_vectors_for_user_code("456") is True
+
+
+@pytest.mark.asyncio
+async def test_should_report_no_vectors_for_unknown_user_code() -> None:
+    # Arrange
+    client = _FakeClient()
+    repository = PineconeVectorRepository(client=client, config=_config())
+
+    # Act
+    found = await repository.has_vectors_for_user_code("unknown")
+
+    # Assert
+    assert found is False
 
 
 @pytest.mark.asyncio

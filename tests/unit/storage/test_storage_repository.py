@@ -166,6 +166,92 @@ async def test_should_wrap_provider_error_on_write() -> None:
         await repository.save_client(_registration())
 
 
+def _jsonl(*registrations: CompanyRegistrationRequest) -> bytes:
+    lines = [json.dumps(item.model_dump(mode="json")) for item in registrations]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_should_delete_only_target_user_code_record() -> None:
+    # Arrange
+    payload = _jsonl(_registration("111", "Floricultura"), _registration("222", "Padaria"))
+    client = _client_with_body(payload)
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act
+    await repository.delete_client("111")
+
+    # Assert
+    records = _written_records(client)
+    assert [record["user_code"] for record in records] == ["222"]
+
+
+@pytest.mark.asyncio
+async def test_should_not_rewrite_when_user_code_not_found_on_delete() -> None:
+    # Arrange
+    client = _client_with_body(_jsonl(_registration("111", "Floricultura")))
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act
+    await repository.delete_client("999")
+
+    # Assert
+    client.put_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_should_not_rewrite_when_object_missing_on_delete() -> None:
+    # Arrange
+    client = _client_with_body(None)
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act
+    await repository.delete_client("111")
+
+    # Assert
+    client.put_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_should_write_empty_body_when_last_record_deleted() -> None:
+    # Arrange
+    client = _client_with_body(_jsonl(_registration("111", "Floricultura")))
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act
+    await repository.delete_client("111")
+
+    # Assert
+    assert client.put_object.call_args.kwargs["Body"] == b""
+
+
+@pytest.mark.asyncio
+async def test_should_wrap_provider_error_on_delete() -> None:
+    # Arrange
+    client = MagicMock()
+    client.get_object.side_effect = BotoCoreError()
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act / Assert
+    with pytest.raises(ClientStorageError):
+        await repository.delete_client("111")
+    client.put_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_should_not_log_user_code_on_delete(caplog: pytest.LogCaptureFixture) -> None:
+    # Arrange
+    client = _client_with_body(_jsonl(_registration("secret-code", "Padaria")))
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act
+    with caplog.at_level("INFO"):
+        await repository.delete_client("secret-code")
+
+    # Assert
+    assert "secret-code" not in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_should_not_log_sensitive_client_data(caplog: pytest.LogCaptureFixture) -> None:
     # Arrange

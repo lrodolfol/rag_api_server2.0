@@ -5,7 +5,8 @@ Persists each client's registration as one line of a single JSONL object
 ``us-east-1``). Updating a client is idempotent: the existing object is read,
 the line matching the client's ``user_code`` is replaced (or appended when new),
 and the object is rewritten, so repeated registrations never accumulate duplicate
-records.
+records. Deleting a client removes its line and rewrites the object only when a
+record was actually removed.
 
 The boto3 SDK is synchronous, so every blocking call is run in a worker thread
 via :func:`asyncio.to_thread` to honour the application's async contract without
@@ -57,6 +58,25 @@ class ClientStorageRepository:
             CLIENT_RECORDS_OBJECT_KEY,
         )
 
+    async def delete_client(self, user_code: str) -> None:
+        """Remove the client's record from the JSONL bucket object, if present.
+
+        The object is only rewritten when a record was actually removed, so
+        deleting an unknown client is a no-op.
+        """
+        records = await asyncio.to_thread(self._read_records)
+        remaining = self._remove_record(records, user_code)
+        if len(remaining) == len(records):
+            logger.info("No client record to delete in bucket '%s'", self._bucket_name)
+            return
+        body = self._serialize(remaining)
+        await asyncio.to_thread(self._put_records, body)
+        logger.info(
+            "Deleted client record from bucket '%s' (key '%s')",
+            self._bucket_name,
+            CLIENT_RECORDS_OBJECT_KEY,
+        )
+
     @property
     def _bucket_name(self) -> str:
         bucket_name = self._config.bucket_name
@@ -99,15 +119,20 @@ class ClientStorageRepository:
     def _merge_record(
         records: list[ClientRecord], registration: CompanyRegistrationRequest
     ) -> list[ClientRecord]:
-        user_code = registration.user_code
-        kept = [
-            record for record in records if record.get("user_code") != user_code
-        ]
+        kept = ClientStorageRepository._remove_record(records, registration.user_code)
         kept.append(registration.model_dump(mode="json"))
         return kept
 
     @staticmethod
+    def _remove_record(
+        records: list[ClientRecord], user_code: str
+    ) -> list[ClientRecord]:
+        return [record for record in records if record.get("user_code") != user_code]
+
+    @staticmethod
     def _serialize(records: list[ClientRecord]) -> str:
+        if not records:
+            return ""
         lines = [json.dumps(record, ensure_ascii=False) for record in records]
         return "\n".join(lines) + "\n"
 
