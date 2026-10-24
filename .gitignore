@@ -219,8 +219,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# vscode
+# IDE'S
 .vscode/
+.idea/
 
 # pessoais
 meus_prompts/
