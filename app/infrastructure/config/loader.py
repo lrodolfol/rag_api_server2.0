@@ -15,7 +15,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final
 
+from dotenv import load_dotenv
+
 from app.infrastructure.config.models import AppConfig
+
+load_dotenv()
 
 ENVIRONMENT_VAR: Final[str] = "ENVIRONMENT"
 CONFIG_FILE_VAR: Final[str] = "CONFIG_FILE"

@@ -27,7 +27,7 @@ from app.infrastructure.pinecone.models import VectorMatch
 
 logger = get_logger(__name__)
 
-SIMILARITY_THRESHOLD: Final[float] = 0.8
+SIMILARITY_THRESHOLD: Final[float] = 0.41
 DEFAULT_TOP_K: Final[int] = 5
 CLOUD_PROVIDER: Final[str] = "aws"
 VectorTuple = tuple[str, list[float], dict[str, str]]
@@ -147,8 +147,11 @@ class PineconeVectorRepository:
         results: list[VectorMatch] = []
         for match in matches:
             score = getattr(match, "score", None)
+            logger.info("Match score: %s, metadata: %s", score, getattr(match, "metadata", None)) #remover
+
             if score is None or score <= SIMILARITY_THRESHOLD:
                 continue
+
             metadata = getattr(match, "metadata", None) or {}
             results.append(
                 VectorMatch(
