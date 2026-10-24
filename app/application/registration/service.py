@@ -81,11 +81,11 @@ class RegistrationService:
     def _build_content(company: CompanyData) -> str:
         """Compose a single text block from the company's fields."""
         fields = [
-            company.name,
-            company.descricao,
-            company.address,
-            company.telephone,
-            company.email,
-            company.detalhes,
+            f"Name: {company.name}",
+            f"Description: {company.descricao}",
+            f"Address: {company.address}",
+            f"Telephone: {company.telephone}",
+            f"Email: {company.email}",
+            f"Details: {company.detalhes}",
         ]
         return "\n".join(fields)
