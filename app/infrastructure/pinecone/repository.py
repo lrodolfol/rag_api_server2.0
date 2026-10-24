@@ -76,9 +76,11 @@ class PineconeVectorRepository:
         if not embedding:
             return []
         await self.create_index_if_not_exists()
-
+        logger.info("Querying Pinecone index '%s' (top_k=%d)", self._config.index_name, top_k)
         response = await asyncio.to_thread(self._query_sync, embedding, top_k)
-        return self._filter_matches(response)
+        matches = self._filter_matches(response)
+        logger.info("Pinecone query returned %d matches above threshold", len(matches))
+        return matches
 
     def _create_index_if_not_exists_sync(self) -> None:
         try:
@@ -147,8 +149,6 @@ class PineconeVectorRepository:
         results: list[VectorMatch] = []
         for match in matches:
             score = getattr(match, "score", None)
-            logger.info("Match score: %s, metadata: %s", score, getattr(match, "metadata", None)) #remover
-
             if score is None or score <= SIMILARITY_THRESHOLD:
                 continue
 

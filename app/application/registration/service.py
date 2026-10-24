@@ -47,28 +47,34 @@ class RegistrationService:
         Raises :class:`InappropriateContentError` (before anything is persisted)
         when moderation flags the submitted content.
         """
+        logger.info("Starting company registration flow")
         company = registration.request
         content = self._build_content(company)
         await self._ensure_appropriate(content)
         embeddings = await self._build_embeddings(content)
+        logger.info("Upserting %d embeddings to vector store", len(embeddings))
         await self._vectors.upsert_company_vectors(
             company.name, registration.user_code, embeddings
         )
+        logger.info("Persisting client record to object storage")
         await self._storage.save_client(registration)
         logger.info("Company registration completed")
 
     async def _ensure_appropriate(self, content: str) -> None:
         """Moderate ``content`` and stop the flow when it is inappropriate."""
+        logger.info("Submitting content to OpenAI moderation")
         result = await self._openai.moderate(content)
         if result.insult:
             logger.info("Registration rejected: inappropriate content detected")
             raise InappropriateContentError(
                 "Submitted content was rejected by moderation"
             )
+        logger.info("Content moderation passed")
 
     async def _build_embeddings(self, content: str) -> list[EmbeddingRecord]:
         """Normalise, chunk and embed ``content``."""
         chunks = generate_chunks(content)
+        logger.info("Content split into %d chunks, generating embeddings", len(chunks))
         return await self._openai.generate_embeddings_from_chunks(chunks)
 
     @staticmethod

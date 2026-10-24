@@ -65,6 +65,7 @@ class ClientStorageRepository:
         return bucket_name
 
     def _read_records(self) -> list[ClientRecord]:
+        logger.info("Reading client records from S3 bucket '%s'", self._bucket_name)
         try:
             response = self._client.get_object(
                 Bucket=self._bucket_name, Key=CLIENT_RECORDS_OBJECT_KEY
@@ -72,6 +73,7 @@ class ClientStorageRepository:
             payload = response["Body"].read().decode("utf-8")
         except ClientError as error:
             if self._is_missing_object(error):
+                logger.info("No existing records found in S3 bucket '%s'", self._bucket_name)
                 return []
             logger.exception("Failed to read client records from storage")
             raise ClientStorageError("Failed to read client records") from error
@@ -81,6 +83,7 @@ class ClientStorageRepository:
         return self._parse(payload)
 
     def _put_records(self, body: str) -> None:
+        logger.info("Writing client records to S3 bucket '%s'", self._bucket_name)
         try:
             self._client.put_object(
                 Bucket=self._bucket_name,

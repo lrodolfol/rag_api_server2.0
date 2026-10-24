@@ -35,13 +35,16 @@ class RedisHistoryRepository:
         self, channel: HistoryChannel, user_code: str
     ) -> list[MessageHistoryItem]:
         """Return the stored message history for a user on a given channel."""
+        logger.info("Fetching conversation history from Redis (channel='%s')", channel.value)
         key = self._key(channel, user_code)
         try:
             raw_items = await self._client.lrange(key, 0, -1)
         except RedisError as error:
             logger.exception("Failed to read conversation history from Redis")
             return []
-        return [self._deserialize(item) for item in raw_items]
+        items = [self._deserialize(item) for item in raw_items]
+        logger.info("Redis history loaded: %d messages (channel='%s')", len(items), channel.value)
+        return items
 
     async def append_message(
         self,
@@ -50,6 +53,7 @@ class RedisHistoryRepository:
         message: MessageHistoryItem,
     ) -> None:
         """Append a message and refresh the 30-minute sliding TTL."""
+        logger.info("Appending '%s' message to Redis history (channel='%s')", message.role, channel.value)
         key = self._key(channel, user_code)
         try:
             await self._client.rpush(key, self._serialize(message))

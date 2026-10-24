@@ -42,14 +42,18 @@ class SearchService:
         self, channel: HistoryChannel, user_key: str, question: str
     ) -> str:
         """Run the full RAG pipeline and return the generated answer."""
+        logger.info("Starting RAG pipeline for channel='%s'", channel.value)
         history = await self._history.get_history(channel, user_key)
+        logger.info("History loaded: %d messages for channel='%s'", len(history), channel.value)
         matches = await self._find_matches(question)
+        logger.info("Vector search completed: %d relevant matches found", len(matches))
         payload = PayloadQuestionOpenIA(question=question, chat_historic=history)
+        logger.info("Requesting chat answer from OpenAI")
         answer = await self._openai.generate_chat_answer(
             payload, self._to_phrases(matches)
         )
         await self._persist_turn(channel, user_key, question, answer)
-        logger.info("Search answered on channel '%s'", channel.value)
+        logger.info("RAG pipeline completed, response ready for channel='%s'", channel.value)
         return answer
 
     async def _find_matches(self, question: str) -> list[VectorMatch]:

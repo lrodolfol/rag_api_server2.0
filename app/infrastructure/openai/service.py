@@ -47,26 +47,33 @@ class OpenAIService:
 
     async def moderate(self, content: str) -> ModerationResult:
         """Check client content for insults/inappropriate text."""
+        logger.info("Sending moderation request to OpenAI")
         prompt = _MODERATION_PROMPT.format(content=content)
         raw_answer = await self._create_response([{"role": "system", "content": prompt}])
+        logger.info("OpenAI moderation response received")
         return self._parse_moderation(raw_answer)
 
     async def generate_embeddings_from_chunks(
         self, chunks: list[str]
     ) -> list[EmbeddingRecord]:
         """Generate one :class:`EmbeddingRecord` per text chunk."""
+        logger.info("Requesting embeddings from OpenAI for %d chunks", len(chunks))
         records: list[EmbeddingRecord] = []
         for chunk in chunks:
             vector = await self._generate_vector(chunk)
             records.append(EmbeddingRecord(text=chunk, vector=vector))
+        logger.info("OpenAI embeddings generated: %d records", len(records))
         return records
 
     async def generate_embedding_for_question(self, question: str) -> list[float]:
         """Generate the embedding vector for an isolated question."""
         if not question.strip():
             return []
+        logger.info("Requesting question embedding from OpenAI")
         enriched = f"{QUERY_PREFIX}{question}" if QUERY_PREFIX else question
-        return await self._generate_vector(enriched)
+        vector = await self._generate_vector(enriched)
+        logger.info("Question embedding received from OpenAI")
+        return vector
 
     async def generate_chat_answer(
         self, payload: PayloadQuestionOpenIA, phrases: list[str]
@@ -74,9 +81,11 @@ class OpenAIService:
         """Generate the chat answer from the guide, history, question and matches."""
         if payload.is_invalid():
             return ""
+        logger.info("Sending chat completion request to OpenAI (context_phrases=%d)", len(phrases))
         answer = await self._create_response(self._build_chat_input(payload, phrases))
         if not answer:
             raise OpenIaException("No answer returned from the OpenAI provider")
+        logger.info("Chat completion response received from OpenAI")
         return answer
 
     async def _generate_vector(self, text: str) -> list[float]:
