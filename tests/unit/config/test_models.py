@@ -3,7 +3,11 @@
 import pytest
 from pydantic import ValidationError
 
-from app.infrastructure.config import EmbeddingModelConfig, OpenAIConfig
+from app.infrastructure.config import (
+    EmbeddingModelConfig,
+    FingerPrintConfig,
+    OpenAIConfig,
+)
 
 
 def _openai_config(models: dict[str, EmbeddingModelConfig]) -> OpenAIConfig:
@@ -71,3 +75,42 @@ def test_should_reject_empty_models() -> None:
     # Act / Assert
     with pytest.raises(ValidationError, match="must be marked as default"):
         _openai_config({})
+
+
+FINGER_PRINT_FIELDS: dict[str, str] = {
+    "prompt_version": "1.0.0",
+    "rules_version": "1.0.0",
+    "model_capability": "economic",
+}
+
+
+def test_should_build_finger_print_config_with_all_fields() -> None:
+    # Act
+    config = FingerPrintConfig(**FINGER_PRINT_FIELDS)
+
+    # Assert
+    assert config.prompt_version == "1.0.0"
+    assert config.rules_version == "1.0.0"
+    assert config.model_capability == "economic"
+
+
+@pytest.mark.parametrize("missing_field", list(FINGER_PRINT_FIELDS))
+def test_should_reject_finger_print_config_with_missing_field(
+    missing_field: str,
+) -> None:
+    # Arrange
+    fields = {k: v for k, v in FINGER_PRINT_FIELDS.items() if k != missing_field}
+
+    # Act / Assert
+    with pytest.raises(ValidationError, match=missing_field):
+        FingerPrintConfig(**fields)
+
+
+@pytest.mark.parametrize("empty_field", list(FINGER_PRINT_FIELDS))
+def test_should_reject_finger_print_config_with_empty_field(empty_field: str) -> None:
+    # Arrange
+    fields = {**FINGER_PRINT_FIELDS, empty_field: ""}
+
+    # Act / Assert
+    with pytest.raises(ValidationError, match=empty_field):
+        FingerPrintConfig(**fields)

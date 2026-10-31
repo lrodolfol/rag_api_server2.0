@@ -8,6 +8,7 @@ replaced with in-memory fakes, so the full application wiring is covered while n
 external provider is contacted.
 """
 
+from fakeredis import FakeAsyncRedis
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import (
@@ -27,10 +28,16 @@ from app.domain import (
     PayloadQuestionOpenIA,
     VectorRepositoryError,
 )
+from app.infrastructure.config import FingerPrintConfig
 from app.infrastructure.openai.models import ModerationResult
 from app.infrastructure.pinecone import VectorMatch
 from app.infrastructure.rate_limit import InMemoryRateLimiter
-from app.infrastructure.redis import HistoryChannel
+from app.infrastructure.redis import (
+    ANSWER_CACHE_KEY_PREFIX,
+    ANSWER_CACHE_TTL_SECONDS,
+    HistoryChannel,
+    RedisAnswerCacheRepository,
+)
 from app.main import create_app
 
 
@@ -120,6 +127,28 @@ class _FakeHistoryRepository:
         self, channel: HistoryChannel, user_code: str, message: MessageHistoryItem
     ) -> None:
         self.appended.append((channel, user_code, message))
+
+
+FINGER_PRINT = FingerPrintConfig(
+    prompt_version="1.0.0", rules_version="1.0.0", model_capability="economic"
+)
+
+
+def _search_service(
+    openai: _FakeOpenAIService,
+    vectors: _FakeVectorRepository,
+    history: _FakeHistoryRepository,
+    redis_client: FakeAsyncRedis | None = None,
+) -> SearchService:
+    """Build the real search service with a real answer cache on fake Redis."""
+    client = redis_client or FakeAsyncRedis(decode_responses=True)
+    return SearchService(
+        openai_service=openai,
+        vector_repository=vectors,
+        history_repository=history,
+        answer_cache=RedisAnswerCacheRepository(client),
+        fingerprint_config=FINGER_PRINT,
+    )
 
 
 def _registration_payload(user_code: str = "123", name: str = "Padaria") -> dict:
@@ -242,9 +271,7 @@ def test_e2e_should_answer_whatsapp_message_through_real_service() -> None:
     matches = [VectorMatch(id="v1", score=0.95, text="Padaria Central", user_code="1")]
     vectors = _FakeVectorRepository(matches=matches)
     history = _FakeHistoryRepository()
-    service = SearchService(
-        openai_service=openai, vector_repository=vectors, history_repository=history
-    )
+    service = _search_service(openai, vectors, history)
     app = create_app()
     app.dependency_overrides[get_search_service] = lambda: service
     client = TestClient(app)
@@ -278,9 +305,7 @@ def test_e2e_should_answer_online_chat_message_through_real_service() -> None:
     history = _FakeHistoryRepository(
         history=[MessageHistoryItem(role=MessageRole.USER, text="oi")]
     )
-    service = SearchService(
-        openai_service=openai, vector_repository=vectors, history_repository=history
-    )
+    service = _search_service(openai, vectors, history)
     app = create_app()
     app.dependency_overrides[get_search_service] = lambda: service
     app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
@@ -311,9 +336,7 @@ def test_e2e_should_return_safe_envelope_for_infrastructure_error() -> None:
     openai = _FakeOpenAIService()
     vectors = _FakeVectorRepository(fail_query=True)
     history = _FakeHistoryRepository()
-    service = SearchService(
-        openai_service=openai, vector_repository=vectors, history_repository=history
-    )
+    service = _search_service(openai, vectors, history)
     app = create_app()
     app.dependency_overrides[get_search_service] = lambda: service
     client = TestClient(app)
@@ -355,3 +378,66 @@ def test_e2e_should_return_safe_envelope_for_unexpected_error() -> None:
     assert body["errors"] == ["internal_error"]
     assert body["message"] == "An unexpected error occurred."
     assert "boom" not in body["message"]
+
+
+# --- Answer cache flow ---------------------------------------------------------
+
+
+def _online_chat_body(message: str, user_code: str = "4567895465") -> dict:
+    return {"message": message, "user_code": user_code, "user_ip": "200.148.12.188"}
+
+
+def test_e2e_should_answer_repeated_question_from_cache() -> None:
+    # Arrange
+    openai = _FakeOpenAIService(answer="Restaurante B")
+    vectors = _FakeVectorRepository(
+        matches=[VectorMatch(id="v2", score=0.93, text="Restaurante B", user_code="2")]
+    )
+    history = _FakeHistoryRepository()
+    redis_client = FakeAsyncRedis(decode_responses=True)
+    service = _search_service(openai, vectors, history, redis_client)
+    app = create_app()
+    app.dependency_overrides[get_search_service] = lambda: service
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
+
+    # Act
+    with TestClient(app) as client:
+        first = client.post("/chat", json=_online_chat_body("Onde comer?"))
+        second = client.post("/chat", json=_online_chat_body("  onde COMER? "))
+        keys = client.portal.call(redis_client.keys, f"{ANSWER_CACHE_KEY_PREFIX}:*")
+        ttl = client.portal.call(redis_client.ttl, keys[0])
+
+    # Assert: same answer, but OpenAI chat was called only once.
+    assert first.json()["message"] == second.json()["message"] == "Restaurante B"
+    assert len(openai.chat_phrases) == 1
+    assert len(keys) == 1
+    assert ANSWER_CACHE_TTL_SECONDS - 10 < ttl <= ANSWER_CACHE_TTL_SECONDS
+    assert [item.role for _, _, item in history.appended] == [
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+    ]
+
+
+def test_e2e_should_share_cache_between_whatsapp_and_online_chat() -> None:
+    # Arrange
+    openai = _FakeOpenAIService(answer="Padaria Central")
+    matches = [VectorMatch(id="v1", score=0.95, text="Padaria Central", user_code="1")]
+    service = _search_service(
+        openai, _FakeVectorRepository(matches=matches), _FakeHistoryRepository()
+    )
+    app = create_app()
+    app.dependency_overrides[get_search_service] = lambda: service
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
+
+    # Act
+    with TestClient(app) as client:
+        whatsapp = client.post(
+            "/whatsapp", json={"number": "5535999999999", "text": "onde comer?"}
+        )
+        online = client.post("/chat", json=_online_chat_body("onde comer?"))
+
+    # Assert
+    assert whatsapp.json()["message"] == online.json()["message"] == "Padaria Central"
+    assert len(openai.chat_phrases) == 1

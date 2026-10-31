@@ -10,7 +10,7 @@ and tracebacks, preventing accidental leakage of sensitive data.
 
 from typing import Self
 
-from pydantic import BaseModel, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 
 class EmbeddingModelConfig(BaseModel):
@@ -97,6 +97,18 @@ class BucketConfig(BaseModel):
     bucket_name: str | None = None
 
 
+class FingerPrintConfig(BaseModel):
+    """Versions that compose the answer-cache fingerprint.
+
+    Bumping any value changes every cache key, which is how cached answers are
+    invalidated manually. ``model_capability`` is used as-is (e.g. ``economic``).
+    """
+
+    prompt_version: str = Field(min_length=1)
+    rules_version: str = Field(min_length=1)
+    model_capability: str = Field(min_length=1)
+
+
 class AppConfig(BaseModel):
     """Root configuration object aggregating every section."""
 
@@ -106,3 +118,4 @@ class AppConfig(BaseModel):
     redis: RedisConfig
     company: CompanyConfig
     bucket: BucketConfig
+    finger_print: FingerPrintConfig

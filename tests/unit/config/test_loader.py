@@ -66,6 +66,11 @@ def _section(index_name: str, env_label: str) -> dict[str, Any]:
             "secret_key": "get from environment",
             "region": "us-east-1",
         },
+        "finger_print": {
+            "prompt_version": "1.0.0",
+            "rules_version": "1.0.0",
+            "model_capability": "economic",
+        },
     }
 
 
@@ -335,3 +340,47 @@ def test_should_not_expose_secrets_in_validation_error(
     # Assert
     assert "openai-secret" not in str(error_info.value)
     assert error_info.value.__cause__ is None
+
+
+def test_should_load_finger_print_section(
+    monkeypatch: pytest.MonkeyPatch, config_file: Path, _set_secrets: None
+) -> None:
+    # Arrange
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(config_file))
+
+    # Act
+    config = get_config()
+
+    # Assert
+    assert config.finger_print.prompt_version == "1.0.0"
+    assert config.finger_print.rules_version == "1.0.0"
+    assert config.finger_print.model_capability == "economic"
+
+
+def test_should_raise_when_finger_print_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None
+) -> None:
+    # Arrange
+    data = {"dev": _section("acha-local-services-dev", "development")}
+    del data["dev"]["finger_print"]
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match="finger_print"):
+        get_config()
+
+
+def test_should_raise_when_finger_print_field_is_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None
+) -> None:
+    # Arrange
+    data = {"dev": _section("acha-local-services-dev", "development")}
+    data["dev"]["finger_print"]["rules_version"] = ""
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match="finger_print.rules_version"):
+        get_config()

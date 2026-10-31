@@ -5,6 +5,7 @@ package must stay free of framework and infrastructure dependencies (FastAPI,
 boto3, HTTP/provider clients) so the domain remains independently testable.
 """
 
+from app.domain.cache import CacheFingerprint
 from app.domain.company import (
     CompanyData,
     CompanyDeletionRequest,
@@ -29,6 +30,7 @@ from app.domain.prompts import INPUT_GUIDE, PATTERN_RESPONSE, QUERY_PREFIX
 from app.domain.search import OnlineChatSearchPayload, WhatsAppSearchPayload
 
 __all__ = [
+    "CacheFingerprint",
     "ClientStorageError",
     "CompanyData",
     "CompanyDeletionRequest",

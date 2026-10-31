@@ -8,6 +8,8 @@ request, and configuration is read lazily (on first use) rather than at import.
 
 from functools import lru_cache
 
+from redis.asyncio import Redis
+
 from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
@@ -18,7 +20,11 @@ from app.infrastructure.pinecone import (
     create_pinecone_client,
 )
 from app.infrastructure.rate_limit import InMemoryRateLimiter
-from app.infrastructure.redis import RedisHistoryRepository, create_redis_client
+from app.infrastructure.redis import (
+    RedisAnswerCacheRepository,
+    RedisHistoryRepository,
+    create_redis_client,
+)
 from app.infrastructure.storage import ClientStorageRepository, create_s3_client
 
 
@@ -44,10 +50,20 @@ def _storage_repository() -> ClientStorageRepository:
 
 
 @lru_cache
-def _history_repository() -> RedisHistoryRepository:
+def _redis_client() -> Redis:
+    # Shared by the history and answer-cache repositories: one connection pool.
     config: AppConfig = get_config()
-    client = create_redis_client(config.redis)
-    return RedisHistoryRepository(client=client)
+    return create_redis_client(config.redis)
+
+
+@lru_cache
+def _history_repository() -> RedisHistoryRepository:
+    return RedisHistoryRepository(client=_redis_client())
+
+
+@lru_cache
+def _answer_cache_repository() -> RedisAnswerCacheRepository:
+    return RedisAnswerCacheRepository(client=_redis_client())
 
 
 @lru_cache
@@ -79,6 +95,8 @@ def get_search_service() -> SearchService:
         openai_service=_openai_service(),
         vector_repository=_vector_repository(),
         history_repository=_history_repository(),
+        answer_cache=_answer_cache_repository(),
+        fingerprint_config=get_config().finger_print,
     )
 
 
