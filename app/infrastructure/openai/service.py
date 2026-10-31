@@ -91,7 +91,7 @@ class OpenAIService:
     async def _generate_vector(self, text: str) -> list[float]:
         try:
             response = await self._client.embeddings.create(
-                input=text, model=self._config.model_embeddings
+                input=text, model=self._config.default_model_embeddings
             )
         except OpenAIError as error:
             logger.exception("OpenAI embedding request failed")

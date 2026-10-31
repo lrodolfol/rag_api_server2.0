@@ -97,3 +97,18 @@ def test_example_file_contains_no_real_secrets() -> None:
     assert content.count("get from environment") == 10
     for value in SECRET_VALUES.values():
         assert value not in content
+
+
+@pytest.mark.parametrize("environment", ["dev", "prod"])
+def test_should_resolve_default_embedding_model_from_real_file(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    # Arrange
+    monkeypatch.setenv("ENVIRONMENT", environment)
+
+    # Act
+    config = get_config()
+
+    # Assert
+    assert set(config.open_ai.models) == {"economic", "stronger"}
+    assert config.open_ai.default_model_embeddings == "text-embedding-3-small"

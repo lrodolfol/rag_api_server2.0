@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Final
 
 from dotenv import load_dotenv
+from pydantic import ValidationError
 
 from app.infrastructure.config.models import AppConfig
 
@@ -84,10 +85,27 @@ def _inject_secrets(section_data: dict) -> dict:
     return section_data
 
 
+def _build_config(section_data: dict) -> AppConfig:
+    """Validate ``section_data`` into an :class:`AppConfig`.
+
+    Validation errors are re-raised as :class:`ConfigError` with only the field
+    locations and messages: the original error embeds the raw input (secrets
+    included), so it is deliberately not chained.
+    """
+    try:
+        return AppConfig(**section_data)
+    except ValidationError as error:
+        details = "; ".join(
+            f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+            for item in error.errors(include_input=False)
+        )
+        raise ConfigError(f"Invalid configuration: {details}") from None
+
+
 @lru_cache(maxsize=1)
 def get_config() -> AppConfig:
     """Return the validated application configuration (loaded once and cached)."""
     environment = os.getenv(ENVIRONMENT_VAR, DEFAULT_ENVIRONMENT)
     raw_section = _read_environment_section(environment, _config_path())
     raw_section["environment"] = environment
-    return AppConfig(**_inject_secrets(raw_section))
+    return _build_config(_inject_secrets(raw_section))

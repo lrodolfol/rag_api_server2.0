@@ -23,7 +23,16 @@ def _section(index_name: str, env_label: str) -> dict[str, Any]:
     return {
         "open_ai": {
             "api_key": "get from environment",
-            "model_embeddings": "text-embedding-3-small",
+            "models": {
+                "economic": {
+                    "default": True,
+                    "model_embeddings": "text-embedding-3-small",
+                },
+                "stronger": {
+                    "default": False,
+                    "model_embeddings": "text-embedding-3-large",
+                },
+            },
             "model_chat": "gpt-3.5-turbo",
         },
         "pinecone": {
@@ -255,3 +264,74 @@ def test_should_cache_config_and_not_reread_file(
     assert second.pinecone.index_name == "acha-local-services-dev"
 
 
+
+
+def test_should_resolve_default_embedding_model(
+    monkeypatch: pytest.MonkeyPatch, config_file: Path, _set_secrets: None
+) -> None:
+    # Arrange
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(config_file))
+
+    # Act
+    config = get_config()
+
+    # Assert
+    assert config.open_ai.default_model_embeddings == "text-embedding-3-small"
+
+
+@pytest.mark.parametrize(
+    "models",
+    [
+        {"economic": {"default": False, "model_embeddings": "text-embedding-3-small"}},
+        {},
+    ],
+    ids=["no-default", "empty"],
+)
+def test_should_raise_when_no_default_embedding_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    _set_secrets: None,
+    models: dict[str, Any],
+) -> None:
+    # Arrange
+    data = {"dev": _section("acha-local-services-dev", "development")}
+    data["dev"]["open_ai"]["models"] = models
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match="must be marked as default"):
+        get_config()
+
+
+def test_should_raise_when_embedding_models_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None
+) -> None:
+    # Arrange
+    data = {"dev": _section("acha-local-services-dev", "development")}
+    del data["dev"]["open_ai"]["models"]
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match="open_ai.models"):
+        get_config()
+
+
+def test_should_not_expose_secrets_in_validation_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None
+) -> None:
+    # Arrange
+    data = {"dev": _section("acha-local-services-dev", "development")}
+    data["dev"]["open_ai"]["models"] = {}
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
+
+    # Act
+    with pytest.raises(ConfigError) as error_info:
+        get_config()
+
+    # Assert
+    assert "openai-secret" not in str(error_info.value)
+    assert error_info.value.__cause__ is None

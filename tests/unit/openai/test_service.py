@@ -15,20 +15,29 @@ from app.domain import (
     PayloadQuestionOpenIA,
     QUERY_PREFIX,
 )
-from app.infrastructure.config import OpenAIConfig
+from app.infrastructure.config import EmbeddingModelConfig, OpenAIConfig
 from app.infrastructure.openai import ModerationResult, OpenAIService
 
 
-def _config() -> OpenAIConfig:
+def _config(default_model: str = "economic") -> OpenAIConfig:
     return OpenAIConfig(
         api_key=SecretStr("test-key"),
-        model_embeddings="text-embedding-3-small",
+        models={
+            "economic": EmbeddingModelConfig(
+                default=default_model == "economic",
+                model_embeddings="text-embedding-3-small",
+            ),
+            "stronger": EmbeddingModelConfig(
+                default=default_model == "stronger",
+                model_embeddings="text-embedding-3-large",
+            ),
+        },
         model_chat="gpt-3.5-turbo",
     )
 
 
-def _service_with(client: MagicMock) -> OpenAIService:
-    return OpenAIService(client=client, config=_config())
+def _service_with(client: MagicMock, default_model: str = "economic") -> OpenAIService:
+    return OpenAIService(client=client, config=_config(default_model))
 
 
 def _embedding_response(vector: list[float]) -> SimpleNamespace:
@@ -251,3 +260,25 @@ async def test_should_wrap_provider_error_on_chat() -> None:
     # Act / Assert
     with pytest.raises(OpenIaException):
         await _service_with(client).generate_chat_answer(payload, [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("default_model", "expected_model"),
+    [
+        ("economic", "text-embedding-3-small"),
+        ("stronger", "text-embedding-3-large"),
+    ],
+)
+async def test_should_send_default_embedding_model_to_provider(
+    default_model: str, expected_model: str
+) -> None:
+    # Arrange
+    client = MagicMock()
+    client.embeddings.create = AsyncMock(return_value=_embedding_response([0.5]))
+
+    # Act
+    await _service_with(client, default_model).generate_embedding_for_question("onde comer?")
+
+    # Assert
+    assert client.embeddings.create.await_args.kwargs["model"] == expected_model
