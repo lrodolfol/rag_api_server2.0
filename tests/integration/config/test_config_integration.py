@@ -4,12 +4,13 @@ These tests exercise the full path (real configuration file on disk + secrets
 injected from environment variables) to validate the end-to-end wiring.
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app.infrastructure.config import AppConfig, get_config
+from app.infrastructure.config import AppConfig, ConfigError, get_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_CONFIG = PROJECT_ROOT / "env.example.json"
@@ -97,3 +98,55 @@ def test_example_file_contains_no_real_secrets() -> None:
     assert content.count("get from environment") == 10
     for value in SECRET_VALUES.values():
         assert value not in content
+
+
+@pytest.mark.parametrize("environment", ["dev", "prod"])
+def test_should_resolve_default_embedding_model_from_real_file(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    # Arrange
+    monkeypatch.setenv("ENVIRONMENT", environment)
+
+    # Act
+    config = get_config()
+
+    # Assert
+    assert set(config.open_ai.models) == {"economic", "stronger"}
+    assert config.open_ai.default_model_embeddings == "text-embedding-3-small"
+
+
+@pytest.mark.parametrize("environment", ["dev", "prod"])
+@pytest.mark.parametrize("config_file", ["env.example.json", "env.json"])
+def test_should_load_finger_print_from_real_file(
+    monkeypatch: pytest.MonkeyPatch, environment: str, config_file: str
+) -> None:
+    # Arrange
+    path = PROJECT_ROOT / config_file
+    if not path.exists():
+        pytest.skip(f"{config_file} not present in this checkout")
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+    monkeypatch.setenv("ENVIRONMENT", environment)
+
+    # Act
+    config = get_config()
+
+    # Assert
+    assert config.finger_print.prompt_version
+    assert config.finger_print.rules_version
+    assert config.finger_print.model_capability
+
+
+def test_should_raise_when_finger_print_removed_from_real_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Arrange
+    data = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    del data["dev"]["finger_print"]
+    broken_file = tmp_path / "env.json"
+    broken_file.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("CONFIG_FILE", str(broken_file))
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match="finger_print"):
+        get_config()

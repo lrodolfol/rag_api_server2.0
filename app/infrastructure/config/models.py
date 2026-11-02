@@ -8,15 +8,41 @@ Secrets use ``pydantic.SecretStr`` so their values are masked in logs, ``repr``
 and tracebacks, preventing accidental leakage of sensitive data.
 """
 
-from pydantic import BaseModel, SecretStr
+from typing import Self
+
+from pydantic import BaseModel, Field, SecretStr, model_validator
+
+
+class EmbeddingModelConfig(BaseModel):
+    """One named embedding model option."""
+
+    default: bool
+    model_embeddings: str
 
 
 class OpenAIConfig(BaseModel):
-    """OpenAI client configuration."""
+    """OpenAI client configuration.
+
+    ``models`` holds every available embedding model; the one in use is the
+    first (in file order) flagged as ``default``.
+    """
 
     api_key: SecretStr
-    model_embeddings: str
+    models: dict[str, EmbeddingModelConfig]
     model_chat: str
+
+    @model_validator(mode="after")
+    def _ensure_default_model(self) -> Self:
+        if not any(model.default for model in self.models.values()):
+            raise ValueError("At least one embedding model must be marked as default")
+        return self
+
+    @property
+    def default_model_embeddings(self) -> str:
+        """Return the first embedding model flagged as ``default``."""
+        return next(
+            model.model_embeddings for model in self.models.values() if model.default
+        )
 
 
 class PineconeConfig(BaseModel):
@@ -71,6 +97,18 @@ class BucketConfig(BaseModel):
     bucket_name: str | None = None
 
 
+class FingerPrintConfig(BaseModel):
+    """Versions that compose the answer-cache fingerprint.
+
+    Bumping any value changes every cache key, which is how cached answers are
+    invalidated manually. ``model_capability`` is used as-is (e.g. ``economic``).
+    """
+
+    prompt_version: str = Field(min_length=1)
+    rules_version: str = Field(min_length=1)
+    model_capability: str = Field(min_length=1)
+
+
 class AppConfig(BaseModel):
     """Root configuration object aggregating every section."""
 
@@ -80,3 +118,4 @@ class AppConfig(BaseModel):
     redis: RedisConfig
     company: CompanyConfig
     bucket: BucketConfig
+    finger_print: FingerPrintConfig

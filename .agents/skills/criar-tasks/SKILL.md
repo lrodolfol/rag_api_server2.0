@@ -58,3 +58,6 @@ description: Converts PRD and Tech Spec into a detailed, sequenced list of imple
 - If the PRD or Tech Spec is missing, halt and direct the user to the `cria-prd` or `cria-techspec` skill.
 - If the user rejects the high-level task list, revise based on feedback and re-present for approval.
 - If the output directory already contains task files, confirm with the user before overwriting.
+
+
+Make questions if you need clarification on the PRD or Tech Spec before generating tasks.

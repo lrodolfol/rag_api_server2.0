@@ -13,7 +13,7 @@ from openai import AsyncOpenAI
 from pydantic import SecretStr
 
 from app.domain import MessageHistoryItem, MessageRole, PayloadQuestionOpenIA
-from app.infrastructure.config import OpenAIConfig
+from app.infrastructure.config import EmbeddingModelConfig, OpenAIConfig
 from app.infrastructure.openai import OpenAIService, create_openai_client
 
 
@@ -21,9 +21,11 @@ class _FakeEmbeddings:
     def __init__(self, vector: list[float]) -> None:
         self._vector = vector
         self.inputs: list[str] = []
+        self.models: list[str] = []
 
     async def create(self, *, input: str, model: str) -> SimpleNamespace:
         self.inputs.append(input)
+        self.models.append(model)
         return SimpleNamespace(data=[SimpleNamespace(embedding=self._vector)])
 
 
@@ -46,7 +48,12 @@ class _FakeOpenAIClient:
 def _config() -> OpenAIConfig:
     return OpenAIConfig(
         api_key=SecretStr("integration-key"),
-        model_embeddings="emb-model",
+        models={
+            "economic": EmbeddingModelConfig(default=True, model_embeddings="emb-model"),
+            "stronger": EmbeddingModelConfig(
+                default=False, model_embeddings="emb-model-large"
+            ),
+        },
         model_chat="chat-model",
         input_guide="guia do assistente",
     )
@@ -86,6 +93,7 @@ async def test_should_run_embeddings_and_chat_flow_end_to_end() -> None:
     assert [record.text for record in records] == ["chunk a", "chunk b"]
     assert all(record.vector == [0.1, 0.2, 0.3] for record in records)
     assert question_vector == [0.1, 0.2, 0.3]
+    assert client.embeddings.models == ["emb-model", "emb-model", "emb-model"]
     assert answer == "resposta final"
     # guide + one history message + question + phrases
     assert len(client.responses.calls[0]) == 4
