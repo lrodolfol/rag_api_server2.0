@@ -3,10 +3,13 @@
 Unlike the per-endpoint API tests (which replace the whole application service),
 these exercise the *real* :class:`RegistrationService` and :class:`SearchService`
 orchestration through the real routes, global exception handlers and response
-envelope. Only the external dependencies (OpenAI, Pinecone, Redis, S3) are
-replaced with in-memory fakes, so the full application wiring is covered while no
+envelope. Only the external dependencies (OpenAI, Pinecone, Redis, S3 and the
+PostgreSQL semantic cache via the ``semantic_cache_db`` fixture) are replaced
+with in-memory fakes, so the full application wiring is covered while no
 external provider is contacted.
 """
+
+from typing import Any
 
 from fakeredis import FakeAsyncRedis
 from fastapi.testclient import TestClient
@@ -17,6 +20,7 @@ from app.api.dependencies import (
     get_registration_service,
     get_search_service,
 )
+from app.application.cache import SemanticCacheService
 from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
@@ -28,9 +32,10 @@ from app.domain import (
     PayloadQuestionOpenIA,
     VectorRepositoryError,
 )
-from app.infrastructure.config import FingerPrintConfig
+from app.infrastructure.config import FingerPrintConfig, PostgresConfig, SemanticCacheConfig
 from app.infrastructure.openai.models import ModerationResult
 from app.infrastructure.pinecone import VectorMatch
+from app.infrastructure.postgres import PostgresSemanticCacheRepository
 from app.infrastructure.rate_limit import InMemoryRateLimiter
 from app.infrastructure.redis import (
     ANSWER_CACHE_KEY_PREFIX,
@@ -50,6 +55,7 @@ class _FakeOpenAIService:
         self._insult = insult
         self._answer = answer
         self.chat_phrases: list[list[str]] = []
+        self.embedded_questions: list[str] = []
 
     async def moderate(self, content: str) -> ModerationResult:
         return ModerationResult(insult=self._insult, insult_text=content if self._insult else "")
@@ -60,6 +66,7 @@ class _FakeOpenAIService:
         return [EmbeddingRecord(text=chunk, vector=[0.1, 0.2, 0.3]) for chunk in chunks]
 
     async def generate_embedding_for_question(self, question: str) -> list[float]:
+        self.embedded_questions.append(question)
         return [0.1, 0.2, 0.3]
 
     async def generate_chat_answer(
@@ -132,6 +139,10 @@ class _FakeHistoryRepository:
 FINGER_PRINT = FingerPrintConfig(
     prompt_version="1.0.0", rules_version="1.0.0", model_capability="economic"
 )
+POSTGRES_CONFIG = PostgresConfig(
+    host="localhost", port=5432, database="rag_auth", user="postgres", password="pw"
+)
+SEMANTIC_CACHE_CONFIG = SemanticCacheConfig(table="rag_response_cache", top_k=3)
 
 
 def _search_service(
@@ -140,13 +151,20 @@ def _search_service(
     history: _FakeHistoryRepository,
     redis_client: FakeAsyncRedis | None = None,
 ) -> SearchService:
-    """Build the real search service with a real answer cache on fake Redis."""
+    """Build the real search service with real caches on fake Redis/PostgreSQL.
+
+    Callers must request the ``semantic_cache_db`` fixture so the semantic cache
+    repository talks to the in-memory database.
+    """
     client = redis_client or FakeAsyncRedis(decode_responses=True)
     return SearchService(
         openai_service=openai,
         vector_repository=vectors,
         history_repository=history,
         answer_cache=RedisAnswerCacheRepository(client),
+        semantic_cache=SemanticCacheService(
+            PostgresSemanticCacheRepository(POSTGRES_CONFIG, SEMANTIC_CACHE_CONFIG)
+        ),
         fingerprint_config=FINGER_PRINT,
     )
 
@@ -265,7 +283,7 @@ def test_e2e_should_return_ok_when_deleting_unknown_company() -> None:
 # --- WhatsApp search flow ----------------------------------------------------
 
 
-def test_e2e_should_answer_whatsapp_message_through_real_service() -> None:
+def test_e2e_should_answer_whatsapp_message_through_real_service(semantic_cache_db: Any) -> None:
     # Arrange
     openai = _FakeOpenAIService(answer="Padaria Central")
     matches = [VectorMatch(id="v1", score=0.95, text="Padaria Central", user_code="1")]
@@ -296,7 +314,7 @@ def test_e2e_should_answer_whatsapp_message_through_real_service() -> None:
 # --- Online-chat search flow -------------------------------------------------
 
 
-def test_e2e_should_answer_online_chat_message_through_real_service() -> None:
+def test_e2e_should_answer_online_chat_message_through_real_service(semantic_cache_db: Any) -> None:
     # Arrange
     openai = _FakeOpenAIService(answer="Restaurante B")
     vectors = _FakeVectorRepository(
@@ -331,7 +349,7 @@ def test_e2e_should_answer_online_chat_message_through_real_service() -> None:
 # --- Global error handling (safe, standardized responses) --------------------
 
 
-def test_e2e_should_return_safe_envelope_for_infrastructure_error() -> None:
+def test_e2e_should_return_safe_envelope_for_infrastructure_error(semantic_cache_db: Any) -> None:
     # Arrange: the vector store fails while answering a WhatsApp message.
     openai = _FakeOpenAIService()
     vectors = _FakeVectorRepository(fail_query=True)
@@ -387,7 +405,7 @@ def _online_chat_body(message: str, user_code: str = "4567895465") -> dict:
     return {"message": message, "user_code": user_code, "user_ip": "200.148.12.188"}
 
 
-def test_e2e_should_answer_repeated_question_from_cache() -> None:
+def test_e2e_should_answer_repeated_question_from_cache(semantic_cache_db: Any) -> None:
     # Arrange
     openai = _FakeOpenAIService(answer="Restaurante B")
     vectors = _FakeVectorRepository(
@@ -407,9 +425,10 @@ def test_e2e_should_answer_repeated_question_from_cache() -> None:
         keys = client.portal.call(redis_client.keys, f"{ANSWER_CACHE_KEY_PREFIX}:*")
         ttl = client.portal.call(redis_client.ttl, keys[0])
 
-    # Assert: same answer, but OpenAI chat was called only once.
+    # Assert: same answer, but OpenAI chat and embedding were called only once.
     assert first.json()["message"] == second.json()["message"] == "Restaurante B"
     assert len(openai.chat_phrases) == 1
+    assert openai.embedded_questions == ["onde comer?"]
     assert len(keys) == 1
     assert ANSWER_CACHE_TTL_SECONDS - 10 < ttl <= ANSWER_CACHE_TTL_SECONDS
     assert [item.role for _, _, item in history.appended] == [
@@ -420,7 +439,7 @@ def test_e2e_should_answer_repeated_question_from_cache() -> None:
     ]
 
 
-def test_e2e_should_share_cache_between_whatsapp_and_online_chat() -> None:
+def test_e2e_should_share_cache_between_whatsapp_and_online_chat(semantic_cache_db: Any) -> None:
     # Arrange
     openai = _FakeOpenAIService(answer="Padaria Central")
     matches = [VectorMatch(id="v1", score=0.95, text="Padaria Central", user_code="1")]
@@ -441,3 +460,44 @@ def test_e2e_should_share_cache_between_whatsapp_and_online_chat() -> None:
     # Assert
     assert whatsapp.json()["message"] == online.json()["message"] == "Padaria Central"
     assert len(openai.chat_phrases) == 1
+
+
+# --- Semantic cache flow -------------------------------------------------------
+
+
+def test_e2e_should_answer_from_semantic_then_exact_cache(semantic_cache_db: Any) -> None:
+    # Arrange
+    openai = _FakeOpenAIService(answer="Marmitaria Central")
+    vectors = _FakeVectorRepository(
+        matches=[VectorMatch(id="v3", score=0.94, text="Marmitaria Central", user_code="3")]
+    )
+    history = _FakeHistoryRepository()
+    redis_client = FakeAsyncRedis(decode_responses=True)
+    service = _search_service(openai, vectors, history, redis_client)
+    app = create_app()
+    app.dependency_overrides[get_search_service] = lambda: service
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
+
+    # Act
+    with TestClient(app) as client:
+        # 1) full miss: RAG + LLM, stored in Redis and PostgreSQL.
+        first = client.post("/chat", json=_online_chat_body("Onde vende marmitas?"))
+        rows_after_first = len(semantic_cache_db.rows)
+        # 2) similar question: semantic hit, populates Redis for the new key.
+        second = client.post("/chat", json=_online_chat_body("Onde posso comprar marmitas?"))
+        selects_after_second = semantic_cache_db.select_count
+        # 3) question 2 again: exact hit, PostgreSQL not queried.
+        third = client.post("/chat", json=_online_chat_body("Onde posso comprar marmitas?"))
+        keys = client.portal.call(redis_client.keys, f"{ANSWER_CACHE_KEY_PREFIX}:*")
+
+    # Assert
+    messages = [response.json()["message"] for response in (first, second, third)]
+    assert messages == ["Marmitaria Central"] * 3
+    assert len(openai.chat_phrases) == 1
+    assert rows_after_first == 1
+    assert len(semantic_cache_db.rows) == 1
+    assert len(keys) == 2
+    assert selects_after_second == 2
+    assert semantic_cache_db.select_count == 2
+    assert openai.embedded_questions == ["onde vende marmitas?", "onde posso comprar marmitas?"]
+    assert len(history.appended) == 6

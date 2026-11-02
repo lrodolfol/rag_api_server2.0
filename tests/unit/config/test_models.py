@@ -7,6 +7,8 @@ from app.infrastructure.config import (
     EmbeddingModelConfig,
     FingerPrintConfig,
     OpenAIConfig,
+    PostgresConfig,
+    SemanticCacheConfig,
 )
 
 
@@ -114,3 +116,90 @@ def test_should_reject_finger_print_config_with_empty_field(empty_field: str) ->
     # Act / Assert
     with pytest.raises(ValidationError, match=empty_field):
         FingerPrintConfig(**fields)
+
+
+POSTGRES_FIELDS: dict[str, str | int] = {
+    "host": "localhost",
+    "port": 5432,
+    "database": "rag_auth",
+    "user": "postgres",
+    "password": "postgres-secret",
+}
+
+SEMANTIC_CACHE_FIELDS: dict[str, str | int] = {
+    "table": "rag_response_cache",
+    "top_k": 3,
+}
+
+
+def test_should_build_postgres_config_with_all_fields() -> None:
+    # Act
+    config = PostgresConfig(**POSTGRES_FIELDS)
+
+    # Assert
+    assert config.host == "localhost"
+    assert config.port == 5432
+    assert config.database == "rag_auth"
+    assert config.user == "postgres"
+    assert config.password.get_secret_value() == "postgres-secret"
+
+
+@pytest.mark.parametrize("missing_field", list(POSTGRES_FIELDS))
+def test_should_reject_postgres_config_with_missing_field(missing_field: str) -> None:
+    # Arrange
+    fields = {k: v for k, v in POSTGRES_FIELDS.items() if k != missing_field}
+
+    # Act / Assert
+    with pytest.raises(ValidationError, match=missing_field):
+        PostgresConfig(**fields)
+
+
+def test_should_mask_postgres_password_in_repr() -> None:
+    # Act
+    config = PostgresConfig(**POSTGRES_FIELDS)
+
+    # Assert
+    assert "postgres-secret" not in repr(config)
+    assert "postgres-secret" not in str(config)
+
+
+def test_should_build_semantic_cache_config_with_all_fields() -> None:
+    # Act
+    config = SemanticCacheConfig(**SEMANTIC_CACHE_FIELDS)
+
+    # Assert
+    assert config.table == "rag_response_cache"
+    assert config.top_k == 3
+
+
+@pytest.mark.parametrize("missing_field", list(SEMANTIC_CACHE_FIELDS))
+def test_should_reject_semantic_cache_config_with_missing_field(
+    missing_field: str,
+) -> None:
+    # Arrange
+    fields = {k: v for k, v in SEMANTIC_CACHE_FIELDS.items() if k != missing_field}
+
+    # Act / Assert
+    with pytest.raises(ValidationError, match=missing_field):
+        SemanticCacheConfig(**fields)
+
+
+def test_should_reject_semantic_cache_config_with_empty_table() -> None:
+    # Arrange
+    fields = {**SEMANTIC_CACHE_FIELDS, "table": ""}
+
+    # Act / Assert
+    with pytest.raises(ValidationError, match="table"):
+        SemanticCacheConfig(**fields)
+
+
+@pytest.mark.parametrize("top_k", [0, -1])
+def test_should_reject_semantic_cache_config_with_non_positive_top_k(
+    top_k: int,
+) -> None:
+    # Arrange
+    fields = {**SEMANTIC_CACHE_FIELDS, "top_k": top_k}
+
+    # Act / Assert
+    with pytest.raises(ValidationError, match="top_k"):
+        SemanticCacheConfig(**fields)

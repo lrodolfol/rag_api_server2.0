@@ -10,6 +10,7 @@ from functools import lru_cache
 
 from redis.asyncio import Redis
 
+from app.application.cache import SemanticCacheService
 from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
@@ -19,6 +20,7 @@ from app.infrastructure.pinecone import (
     PineconeVectorRepository,
     create_pinecone_client,
 )
+from app.infrastructure.postgres import PostgresSemanticCacheRepository
 from app.infrastructure.rate_limit import InMemoryRateLimiter
 from app.infrastructure.redis import (
     RedisAnswerCacheRepository,
@@ -67,6 +69,20 @@ def _answer_cache_repository() -> RedisAnswerCacheRepository:
 
 
 @lru_cache
+def _semantic_cache_repository() -> PostgresSemanticCacheRepository:
+    config: AppConfig = get_config()
+    return PostgresSemanticCacheRepository(
+        postgres_config=config.postgres,
+        semantic_cache_config=config.semantic_cache,
+    )
+
+
+@lru_cache
+def _semantic_cache_service() -> SemanticCacheService:
+    return SemanticCacheService(repository=_semantic_cache_repository())
+
+
+@lru_cache
 def _rate_limiter() -> InMemoryRateLimiter:
     # Cached so the in-memory per-IP windows are shared across all requests.
     return InMemoryRateLimiter()
@@ -96,6 +112,7 @@ def get_search_service() -> SearchService:
         vector_repository=_vector_repository(),
         history_repository=_history_repository(),
         answer_cache=_answer_cache_repository(),
+        semantic_cache=_semantic_cache_service(),
         fingerprint_config=get_config().finger_print,
     )
 

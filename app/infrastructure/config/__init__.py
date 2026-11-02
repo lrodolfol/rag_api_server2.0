@@ -14,7 +14,9 @@ from app.infrastructure.config.models import (
     FingerPrintConfig,
     OpenAIConfig,
     PineconeConfig,
+    PostgresConfig,
     RedisConfig,
+    SemanticCacheConfig,
 )
 
 __all__ = [
@@ -27,6 +29,8 @@ __all__ = [
     "FingerPrintConfig",
     "OpenAIConfig",
     "PineconeConfig",
+    "PostgresConfig",
     "RedisConfig",
+    "SemanticCacheConfig",
     "get_config",
 ]

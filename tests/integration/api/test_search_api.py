@@ -1,16 +1,30 @@
 """Integration tests for the WhatsApp and online-chat search endpoints.
 
-The HTTP layer is exercised end to end with a FastAPI ``TestClient``; the shared
-search service is replaced with a fake via dependency override so no external
-provider is contacted. The online-chat endpoint uses a real in-memory rate
-limiter (with a small window) to exercise the blocking path.
+The HTTP layer is exercised end to end with a FastAPI ``TestClient``. Most tests
+replace the shared search service with a fake via dependency override; the
+pipeline tests at the end wire the real :class:`SearchService` with OpenAI and
+Pinecone mocked, the answer cache on ``fakeredis`` and the real semantic cache
+on an in-memory PostgreSQL (``semantic_cache_db`` fixture), so no external
+provider is contacted. The online-chat endpoint uses a real in-memory rate limiter (with
+a small window) to exercise the blocking path.
 """
 
+from typing import Any
+from unittest.mock import AsyncMock
+
+import psycopg
+import pytest
+from fakeredis import FakeAsyncRedis
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import get_rate_limiter, get_search_service
+from app.application.cache import SemanticCacheService
+from app.application.search import SearchService
+from app.infrastructure.config import FingerPrintConfig, PostgresConfig, SemanticCacheConfig
+from app.infrastructure.postgres import PostgresSemanticCacheRepository
+from app.infrastructure.pinecone import VectorMatch
 from app.infrastructure.rate_limit import InMemoryRateLimiter
-from app.infrastructure.redis import HistoryChannel
+from app.infrastructure.redis import HistoryChannel, RedisAnswerCacheRepository
 from app.main import create_app
 
 
@@ -134,3 +148,211 @@ def test_should_rate_limit_each_ip_independently() -> None:
     # Assert: distinct IPs each get their own window.
     assert first_ip.status_code == 200
     assert second_ip.status_code == 200
+
+
+# --- Real search pipeline with mocked providers --------------------------------
+
+FINGER_PRINT = FingerPrintConfig(
+    prompt_version="1.0.0", rules_version="1.0.0", model_capability="economic"
+)
+EMBEDDING = [0.1, 0.2, 0.3]
+DISTANT_EMBEDDING = [0.3, -0.2, 0.1]
+UNRELATED_QUESTION = "Onde tem pizza?"
+RAW_QUESTION = "  Onde VOCÊ vende   marmitas "
+NORMALIZED_QUESTION = "onde voce vende marmitas"
+
+
+POSTGRES_CONFIG = PostgresConfig(
+    host="localhost", port=5432, database="rag_auth", user="postgres", password="pw"
+)
+SEMANTIC_CACHE_CONFIG = SemanticCacheConfig(table="rag_response_cache", top_k=3)
+
+
+class _Pipeline:
+    """Real :class:`SearchService` wired to mocked OpenAI, Pinecone and history."""
+
+    def __init__(self) -> None:
+        self.openai = AsyncMock()
+        self.openai.generate_embedding_for_question.return_value = EMBEDDING
+        self.openai.generate_chat_answer.return_value = "Marmitaria Central"
+        self.vectors = AsyncMock()
+        self.vectors.query.return_value = [
+            VectorMatch(id="v1", score=0.95, text="Marmitaria Central", user_code="1")
+        ]
+        self.history = AsyncMock()
+        self.history.get_history.return_value = []
+        self.redis = FakeAsyncRedis(decode_responses=True)
+        self.service = SearchService(
+            openai_service=self.openai,
+            vector_repository=self.vectors,
+            history_repository=self.history,
+            answer_cache=RedisAnswerCacheRepository(self.redis),
+            semantic_cache=SemanticCacheService(
+                PostgresSemanticCacheRepository(POSTGRES_CONFIG, SEMANTIC_CACHE_CONFIG)
+            ),
+            fingerprint_config=FINGER_PRINT,
+        )
+
+    def client(self) -> TestClient:
+        app = create_app()
+        app.dependency_overrides[get_search_service] = lambda: self.service
+        app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
+        return TestClient(app)
+
+
+def _post_question(client: TestClient, endpoint: str, question: str) -> dict:
+    if endpoint == "/whatsapp":
+        body = {"number": "5535999999999", "text": question}
+    else:
+        body = {"message": question, "user_code": "1", "user_ip": "200.0.0.1"}
+    return client.post(endpoint, json=body).json()
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_embed_normalized_question_once_through_endpoint(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange
+    pipeline = _Pipeline()
+
+    # Act
+    with pipeline.client() as client:
+        body = _post_question(client, endpoint, RAW_QUESTION)
+
+    # Assert
+    assert body["message"] == "Marmitaria Central"
+    pipeline.openai.generate_embedding_for_question.assert_awaited_once_with(
+        NORMALIZED_QUESTION
+    )
+    pipeline.vectors.query.assert_awaited_once_with(EMBEDDING)
+    payload, _ = pipeline.openai.generate_chat_answer.await_args.args
+    assert payload.question == RAW_QUESTION
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_not_embed_again_when_answer_is_cached(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange
+    pipeline = _Pipeline()
+
+    # Act
+    with pipeline.client() as client:
+        _post_question(client, endpoint, RAW_QUESTION)
+        body = _post_question(client, endpoint, NORMALIZED_QUESTION)
+
+    # Assert
+    assert body["message"] == "Marmitaria Central"
+    pipeline.openai.generate_embedding_for_question.assert_awaited_once()
+
+
+# --- Semantic cache through the endpoints ---------------------------------------
+
+SIMILAR_QUESTION = "Onde posso comprar marmitas?"
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_store_answer_in_both_caches_on_semantic_miss(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange
+    pipeline = _Pipeline()
+
+    # Act
+    with pipeline.client() as client:
+        body = _post_question(client, endpoint, RAW_QUESTION)
+        redis_keys = client.portal.call(pipeline.redis.keys, "*")
+
+    # Assert
+    assert body["message"] == "Marmitaria Central"
+    pipeline.openai.generate_chat_answer.assert_awaited_once()
+    assert len(redis_keys) == 1
+    assert len(semantic_cache_db.rows) == 1
+    row = semantic_cache_db.rows[0]
+    assert row["input_text"] == RAW_QUESTION
+    assert row["normalized_text"] == NORMALIZED_QUESTION
+    assert row["embedding"] == "[0.1,0.2,0.3]"
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_answer_similar_question_from_semantic_cache(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange
+    pipeline = _Pipeline()
+
+    # Act
+    with pipeline.client() as client:
+        _post_question(client, endpoint, RAW_QUESTION)
+        body = _post_question(client, endpoint, SIMILAR_QUESTION)
+        redis_keys = client.portal.call(pipeline.redis.keys, "*")
+
+    # Assert: answered without RAG/LLM, Redis populated for the new question.
+    assert body["message"] == "Marmitaria Central"
+    pipeline.openai.generate_chat_answer.assert_awaited_once()
+    pipeline.vectors.query.assert_awaited_once()
+    assert len(redis_keys) == 2
+    assert len(semantic_cache_db.rows) == 1
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_run_rag_when_semantic_similarity_is_below_threshold(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange: the second embedding is far from the cached one (similarity < 0.91).
+    pipeline = _Pipeline()
+    pipeline.openai.generate_embedding_for_question.side_effect = [
+        EMBEDDING,
+        DISTANT_EMBEDDING,
+    ]
+    pipeline.openai.generate_chat_answer.side_effect = [
+        "Marmitaria Central",
+        "Pizzaria Bella",
+    ]
+
+    # Act
+    with pipeline.client() as client:
+        _post_question(client, endpoint, RAW_QUESTION)
+        body = _post_question(client, endpoint, UNRELATED_QUESTION)
+
+    # Assert: answered by the RAG pipeline and stored as a new semantic entry.
+    assert body["message"] == "Pizzaria Bella"
+    assert pipeline.openai.generate_chat_answer.await_count == 2
+    assert pipeline.vectors.query.await_count == 2
+    assert len(semantic_cache_db.rows) == 2
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_not_query_semantic_cache_on_exact_hit(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange
+    pipeline = _Pipeline()
+
+    # Act
+    with pipeline.client() as client:
+        _post_question(client, endpoint, RAW_QUESTION)
+        body = _post_question(client, endpoint, RAW_QUESTION)
+
+    # Assert
+    assert body["message"] == "Marmitaria Central"
+    assert semantic_cache_db.select_count == 1
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_answer_through_rag_when_postgres_fails(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange
+    semantic_cache_db.error = psycopg.OperationalError("connection refused")
+    pipeline = _Pipeline()
+
+    # Act
+    with pipeline.client() as client:
+        response_body = _post_question(client, endpoint, RAW_QUESTION)
+
+    # Assert
+    assert response_body["status_code"] == 200
+    assert response_body["message"] == "Marmitaria Central"
+    pipeline.openai.generate_chat_answer.assert_awaited_once()
+    assert semantic_cache_db.rows == []

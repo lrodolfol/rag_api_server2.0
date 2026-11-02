@@ -5,7 +5,11 @@ package must stay free of framework and infrastructure dependencies (FastAPI,
 boto3, HTTP/provider clients) so the domain remains independently testable.
 """
 
-from app.domain.cache import CacheFingerprint
+from app.domain.cache import (
+    CacheFingerprint,
+    SemanticCacheEntry,
+    SemanticCacheMatch,
+)
 from app.domain.company import (
     CompanyData,
     CompanyDeletionRequest,
@@ -48,6 +52,8 @@ __all__ = [
     "PayloadQuestionOpenIA",
     "QUERY_PREFIX",
     "RateLimitError",
+    "SemanticCacheEntry",
+    "SemanticCacheMatch",
     "VectorRepositoryError",
     "WhatsAppSearchPayload",
 ]
