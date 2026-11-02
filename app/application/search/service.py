@@ -6,8 +6,10 @@ WhatsApp and online-chat endpoints, so the flow is defined once:
 * look up the exact answer cache by the question fingerprint (hit returns early,
   without embedding the question or consulting the semantic cache);
 * generate the embedding of the normalized question once (reused downstream);
-* look up the semantic cache with that embedding; a hit returns the stored
-  answer and also stores it in the exact cache under the current key;
+* look up the semantic cache with that embedding; only matches whose similarity
+  reaches ``SIMILARITY_THRESHOLD`` count (their distinct answers are joined into
+  one), and a hit returns that answer and also stores it in the exact cache
+  under the current key;
 * load the user's prior history for the channel;
 * query the vector store with that embedding (only matches above the
   similarity threshold);
@@ -37,6 +39,7 @@ from app.domain import (
     MessageHistoryItem,
     MessageRole,
     PayloadQuestionOpenIA,
+    SemanticCacheMatch,
 )
 from app.infrastructure.config import FingerPrintConfig
 from app.infrastructure.logging.logger import get_logger
@@ -51,10 +54,13 @@ from app.infrastructure.redis import (
 logger = get_logger(__name__)
 
 _LOGGED_KEY_LENGTH: Final[int] = 8
+_ANSWER_SEPARATOR: Final[str] = "\n\n"
 
 
 class SearchService:
     """Coordinate the shared RAG search pipeline for both channels."""
+
+    SIMILARITY_THRESHOLD: Final[float] = 0.81
 
     def __init__(
         self,
@@ -131,10 +137,11 @@ class SearchService:
         fingerprint: CacheFingerprint,
         embedding: list[float],
     ) -> str | None:
-        """Return the semantic cache answer, also caching it under the exact key."""
+        """Return the answer of the matches above the threshold, also caching it."""
         answer = await self._semantic_cache.find_answer(fingerprint, embedding)
+        semantic_answer = self.threshold_evaluate(answer)
         short_key = cache_key[:_LOGGED_KEY_LENGTH]
-        if answer is None:
+        if semantic_answer is None:
             logger.info(
                 "Semantic cache miss for channel='%s' (key='%s')", channel.value, short_key
             )
@@ -144,8 +151,21 @@ class SearchService:
             channel.value,
             short_key,
         )
-        await self._answer_cache.set(cache_key, answer)
-        return answer
+        await self._answer_cache.set(cache_key, semantic_answer)
+        return semantic_answer
+
+    @classmethod
+    def threshold_evaluate(cls, matches: list[SemanticCacheMatch]) -> str | None:
+        """Join the distinct answers at or above the threshold, or ``None`` if none."""
+        accepted_answers: list[str] = []
+        for match in matches:
+            if match.similarity < cls.SIMILARITY_THRESHOLD:
+                continue
+            if match.response not in accepted_answers:
+                accepted_answers.append(match.response)
+        if not accepted_answers:
+            return None
+        return _ANSWER_SEPARATOR.join(accepted_answers)
 
     async def _run_pipeline(
         self,

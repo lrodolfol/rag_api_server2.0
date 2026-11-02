@@ -156,6 +156,8 @@ FINGER_PRINT = FingerPrintConfig(
     prompt_version="1.0.0", rules_version="1.0.0", model_capability="economic"
 )
 EMBEDDING = [0.1, 0.2, 0.3]
+DISTANT_EMBEDDING = [0.3, -0.2, 0.1]
+UNRELATED_QUESTION = "Onde tem pizza?"
 RAW_QUESTION = "  Onde VOCÊ vende   marmitas "
 NORMALIZED_QUESTION = "onde voce vende marmitas"
 
@@ -291,6 +293,33 @@ def test_should_answer_similar_question_from_semantic_cache(
     pipeline.vectors.query.assert_awaited_once()
     assert len(redis_keys) == 2
     assert len(semantic_cache_db.rows) == 1
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_run_rag_when_semantic_similarity_is_below_threshold(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange: the second embedding is far from the cached one (similarity < 0.91).
+    pipeline = _Pipeline()
+    pipeline.openai.generate_embedding_for_question.side_effect = [
+        EMBEDDING,
+        DISTANT_EMBEDDING,
+    ]
+    pipeline.openai.generate_chat_answer.side_effect = [
+        "Marmitaria Central",
+        "Pizzaria Bella",
+    ]
+
+    # Act
+    with pipeline.client() as client:
+        _post_question(client, endpoint, RAW_QUESTION)
+        body = _post_question(client, endpoint, UNRELATED_QUESTION)
+
+    # Assert: answered by the RAG pipeline and stored as a new semantic entry.
+    assert body["message"] == "Pizzaria Bella"
+    assert pipeline.openai.generate_chat_answer.await_count == 2
+    assert pipeline.vectors.query.await_count == 2
+    assert len(semantic_cache_db.rows) == 2
 
 
 @pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])

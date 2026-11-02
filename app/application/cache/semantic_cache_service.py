@@ -1,9 +1,9 @@
 """Semantic answer cache service.
 
 Hides the semantic cache record details (id, creation time, serialization) and
-the database from the search flow. A lookup is a hit whenever the repository
-returns at least one match: the closest one (``best_match``) is used and no
-minimum similarity threshold is applied in this version.
+the database from the search flow. A lookup returns every match found by the
+repository (most similar first); deciding which ones are close enough is up to
+the caller (see ``SearchService.threshold_evaluate``).
 
 Repository failures are already logged and turned into a miss (read) or ignored
 (write), so this service never breaks the request.
@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.application.cache.answer_policy import is_cacheable_answer
-from app.domain import CacheFingerprint, SemanticCacheEntry
+from app.domain import CacheFingerprint, SemanticCacheEntry, SemanticCacheMatch
 from app.infrastructure.postgres import PostgresSemanticCacheRepository
 
 
@@ -25,13 +25,9 @@ class SemanticCacheService:
 
     async def find_answer(
         self, fingerprint: CacheFingerprint, embedding: list[float]
-    ) -> str | None:
-        """Return the closest cached answer for the fingerprint, or ``None`` on miss."""
-        matches = await self._repository.find_nearest(embedding, fingerprint)
-        if not matches:
-            return None
-        best_match = matches[0]
-        return best_match.response
+    ) -> list[SemanticCacheMatch]:
+        """Return every cached match for the fingerprint, most similar first (``[]`` on miss)."""
+        return await self._repository.find_nearest(embedding, fingerprint)
 
     async def store(
         self,

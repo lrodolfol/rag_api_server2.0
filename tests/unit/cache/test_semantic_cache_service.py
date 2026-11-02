@@ -38,40 +38,42 @@ def _service(matches: list[SemanticCacheMatch] | None = None) -> tuple[SemanticC
 
 
 @pytest.mark.asyncio
-async def test_should_return_answer_of_best_match() -> None:
+async def test_should_return_every_match_in_repository_order() -> None:
     # Arrange
-    service, repository = _service([_match("Melhor", 0.1), _match("Pior", 0.5)])
+    matches = [_match("Melhor", 0.1), _match("Pior", 0.5)]
+    service, repository = _service(matches)
 
     # Act
-    answer = await service.find_answer(FINGERPRINT, EMBEDDING)
+    result = await service.find_answer(FINGERPRINT, EMBEDDING)
 
     # Assert
-    assert answer == "Melhor"
+    assert result == matches
     repository.find_nearest.assert_awaited_once_with(EMBEDDING, FINGERPRINT)
 
 
 @pytest.mark.asyncio
-async def test_should_return_none_when_no_match() -> None:
+async def test_should_return_empty_list_when_no_match() -> None:
     # Arrange
     service, _ = _service([])
 
     # Act
-    answer = await service.find_answer(FINGERPRINT, EMBEDDING)
+    result = await service.find_answer(FINGERPRINT, EMBEDDING)
 
     # Assert
-    assert answer is None
+    assert result == []
 
 
 @pytest.mark.asyncio
-async def test_should_return_best_match_regardless_of_similarity() -> None:
-    # Arrange: no minimum similarity threshold in this version.
-    service, _ = _service([_match("Distante", 0.95)])
+async def test_should_not_filter_matches_by_similarity() -> None:
+    # Arrange: the similarity threshold is applied by the search service.
+    matches = [_match("Proximo", 0.05), _match("Distante", 0.95)]
+    service, _ = _service(matches)
 
     # Act
-    answer = await service.find_answer(FINGERPRINT, EMBEDDING)
+    result = await service.find_answer(FINGERPRINT, EMBEDDING)
 
     # Assert
-    assert answer == "Distante"
+    assert result == matches
 
 
 @pytest.mark.asyncio
