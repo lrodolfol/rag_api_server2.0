@@ -15,6 +15,7 @@ SECRET_VALUES: dict[str, str] = {
     "REDIS_PASSWORD": "redis-secret",
     "CLOUD_ACCESS_KEY": "bucket-access-secret",
     "CLOUD_SECRET_KEY": "bucket-secret-secret",
+    "DATA_BASE_PASSWORD": "postgres-secret",
 }
 
 
@@ -70,6 +71,17 @@ def _section(index_name: str, env_label: str) -> dict[str, Any]:
             "prompt_version": "1.0.0",
             "rules_version": "1.0.0",
             "model_capability": "economic",
+        },
+        "postgres": {
+            "host": "localhost",
+            "port": 5432,
+            "database": "rag_auth",
+            "user": "postgres",
+            "password": "get from environment",
+        },
+        "semantic_cache": {
+            "table": "rag_response_cache",
+            "top_k": 3,
         },
     }
 
@@ -162,6 +174,7 @@ def test_should_resolve_secrets_from_environment_variables(
     assert config.redis.password.get_secret_value() == "redis-secret"
     assert config.bucket.access_key.get_secret_value() == "bucket-access-secret"
     assert config.bucket.secret_key.get_secret_value() == "bucket-secret-secret"
+    assert config.postgres.password.get_secret_value() == "postgres-secret"
 
 
 def test_should_ignore_secret_value_present_in_file(
@@ -194,6 +207,7 @@ def test_should_mask_secrets_in_repr(
     # Assert
     assert "openai-secret" not in repr(config)
     assert "redis-secret" not in repr(config)
+    assert "postgres-secret" not in repr(config)
 
 
 @pytest.mark.parametrize("missing_var", sorted(set(SECRET_ENV_VARS.values())))
@@ -267,8 +281,6 @@ def test_should_cache_config_and_not_reread_file(
     # Assert
     assert second is first
     assert second.pinecone.index_name == "acha-local-services-dev"
-
-
 
 
 def test_should_resolve_default_embedding_model(
@@ -383,4 +395,66 @@ def test_should_raise_when_finger_print_field_is_empty(
 
     # Act / Assert
     with pytest.raises(ConfigError, match="finger_print.rules_version"):
+        get_config()
+
+
+def test_should_load_postgres_and_semantic_cache_sections(
+    monkeypatch: pytest.MonkeyPatch, config_file: Path, _set_secrets: None
+) -> None:
+    # Arrange
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(config_file))
+
+    # Act
+    config = get_config()
+
+    # Assert
+    assert config.postgres.host == "localhost"
+    assert config.postgres.port == 5432
+    assert config.postgres.database == "rag_auth"
+    assert config.postgres.user == "postgres"
+    assert config.semantic_cache.table == "rag_response_cache"
+    assert config.semantic_cache.top_k == 3
+
+
+def test_should_raise_when_database_password_missing(
+    monkeypatch: pytest.MonkeyPatch, config_file: Path, _set_secrets: None
+) -> None:
+    # Arrange
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(config_file))
+    monkeypatch.delenv("DATA_BASE_PASSWORD", raising=False)
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match="DATA_BASE_PASSWORD"):
+        get_config()
+
+
+@pytest.mark.parametrize("section", ["postgres", "semantic_cache"])
+def test_should_raise_when_database_section_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None, section: str
+) -> None:
+    # Arrange
+    data = {"dev": _section("acha-local-services-dev", "development")}
+    del data["dev"][section]
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match=section):
+        get_config()
+
+
+@pytest.mark.parametrize("top_k", [0, -1])
+def test_should_raise_when_semantic_cache_top_k_not_positive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None, top_k: int
+) -> None:
+    # Arrange
+    data = {"dev": _section("acha-local-services-dev", "development")}
+    data["dev"]["semantic_cache"]["top_k"] = top_k
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
+
+    # Act / Assert
+    with pytest.raises(ConfigError, match="semantic_cache.top_k"):
         get_config()

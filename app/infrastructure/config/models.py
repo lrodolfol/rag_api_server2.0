@@ -1,8 +1,9 @@
 """Typed configuration models.
 
-Each application concern (OpenAI, Pinecone, Redis, company, bucket) is modelled
-as its own section so the rest of the codebase depends on a single, validated
-configuration object instead of reading environment data ad hoc.
+Each application concern (OpenAI, Pinecone, Redis, PostgreSQL, company, bucket,
+semantic cache) is modelled as its own section so the rest of the codebase
+depends on a single, validated configuration object instead of reading
+environment data ad hoc.
 
 Secrets use ``pydantic.SecretStr`` so their values are masked in logs, ``repr``
 and tracebacks, preventing accidental leakage of sensitive data.
@@ -109,6 +110,27 @@ class FingerPrintConfig(BaseModel):
     model_capability: str = Field(min_length=1)
 
 
+class PostgresConfig(BaseModel):
+    """PostgreSQL connection configuration (semantic cache storage)."""
+
+    host: str
+    port: int
+    database: str
+    user: str
+    password: SecretStr
+
+
+class SemanticCacheConfig(BaseModel):
+    """Semantic cache query parameters.
+
+    ``table`` is the pgvector table holding cached answers and ``top_k`` the
+    number of nearest neighbours returned by each lookup.
+    """
+
+    table: str = Field(min_length=1)
+    top_k: int = Field(gt=0)
+
+
 class AppConfig(BaseModel):
     """Root configuration object aggregating every section."""
 
@@ -119,3 +141,5 @@ class AppConfig(BaseModel):
     company: CompanyConfig
     bucket: BucketConfig
     finger_print: FingerPrintConfig
+    postgres: PostgresConfig
+    semantic_cache: SemanticCacheConfig

@@ -35,6 +35,7 @@ SECRET_ENV_VARS: Final[dict[tuple[str, str], str]] = {
     ("redis", "password"): "REDIS_PASSWORD",
     ("bucket", "access_key"): "CLOUD_ACCESS_KEY",
     ("bucket", "secret_key"): "CLOUD_SECRET_KEY",
+    ("postgres", "password"): "DATA_BASE_PASSWORD",
 }
 
 
