@@ -109,11 +109,14 @@ class OpenAIService:
     def _build_chat_input(
         self, payload: PayloadQuestionOpenIA, phrases: list[str]
     ) -> list[ChatMessage]:
+        knowledge = "\n\n------\n\n".join(
+            phrases
+        )
         return [
             {"role": "system", "content": INPUT_GUIDE},
             *self._build_history(payload),
             {"role": "user", "content": f"Pergunta: {payload.question}"},
-            {"role": "system", "content": f"Trechos: {phrases}"},
+            {"role": "system", "content": f"Trechos: {knowledge}"},
         ]
 
     def _build_history(self, payload: PayloadQuestionOpenIA) -> list[ChatMessage]:
