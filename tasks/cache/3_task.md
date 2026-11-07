@@ -34,7 +34,7 @@ derrubam a requisição.
 - `async def set(self, cache_key: str, answer: str) -> None`:
   - Grava com TTL de 24h (`SET ... EX`).
   - `RedisError`: `logger.exception(...)` e retorna sem propagar.
-- O repositório **não** decide o que é cacheável (resposta vazia, `PATTERN_RESPONSE`): essa regra
+- O repositório **não** decide o que é cacheável (resposta vazia): essa regra
   é do serviço de aplicação (tarefa 4.0).
 - Logs: `info` para hit, miss e gravação, usando só os 8 primeiros caracteres do `cache_key`.
   Nunca logar a resposta nem a pergunta.

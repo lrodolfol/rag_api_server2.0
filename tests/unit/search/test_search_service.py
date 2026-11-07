@@ -6,8 +6,8 @@ import pytest
 
 from app.application.cache import build_cache_key, build_fingerprint
 from app.application.search import SearchService
+from app.application.search import service as search_service
 from app.domain import (
-    PATTERN_RESPONSE,
     MessageHistoryItem,
     MessageRole,
     OpenIaException,
@@ -23,6 +23,21 @@ CacheMocks = tuple[SearchService, AsyncMock, AsyncMock, AsyncMock, AsyncMock]
 FINGER_PRINT = FingerPrintConfig(
     prompt_version="1.0.0", rules_version="1.0.0", model_capability="economic"
 )
+
+
+INTRO = "Encontrei para você:"
+NOT_FOUND = "Nada encontrado."
+
+
+@pytest.fixture(autouse=True)
+def _fixed_search_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the random intro and not-found messages with a single fixed one."""
+    monkeypatch.setattr(search_service, "_ANSWER_MESSAGES", (INTRO,))
+    monkeypatch.setattr(search_service, "_NOT_FOUND_MESSAGES", (NOT_FOUND,))
+
+
+def _with_intro(answer: str) -> str:
+    return f"{INTRO}\n\n{answer}"
 
 
 def _match(text: str, score: float = 0.95) -> VectorMatch:
@@ -125,7 +140,7 @@ async def test_should_run_pipeline_and_return_generated_answer() -> None:
     answer = await service.search(HistoryChannel.WHATSAPP, "5535999", "onde comer?")
 
     # Assert
-    assert answer == "Padaria Central"
+    assert answer == _with_intro("Padaria Central")
     openai.generate_embedding_for_question.assert_awaited_once_with("onde comer?")
     vectors.query.assert_awaited_once_with([0.1, 0.2])
     openai.generate_chat_answer.assert_awaited_once()
@@ -197,6 +212,19 @@ async def test_should_read_history_before_answering() -> None:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["", "   "])
+async def test_should_return_not_found_message_when_answer_is_empty(answer: str) -> None:
+    # Arrange
+    service, _, _, _ = _service(answer=answer)
+
+    # Act
+    result = await service.search(HistoryChannel.ONLINE, "123", "onde comer?")
+
+    # Assert
+    assert result == NOT_FOUND
+
+
 # --- Answer cache -------------------------------------------------------------
 
 
@@ -211,7 +239,7 @@ async def test_should_return_cached_answer_without_calling_openai_or_pinecone() 
     answer = await service.search(HistoryChannel.WHATSAPP, "5535999", "onde comer?")
 
     # Assert
-    assert answer == "Resposta em cache"
+    assert answer == _with_intro("Resposta em cache")
     answer_cache.get.assert_awaited_once_with(_expected_key("onde comer?"))
     openai.generate_embedding_for_question.assert_not_awaited()
     openai.generate_chat_answer.assert_not_awaited()
@@ -246,7 +274,7 @@ async def test_should_run_pipeline_and_cache_answer_on_miss() -> None:
     answer = await service.search(HistoryChannel.WHATSAPP, "5535999", "onde comer?")
 
     # Assert
-    assert answer == "Padaria Central"
+    assert answer == _with_intro("Padaria Central")
     openai.generate_chat_answer.assert_awaited_once()
     answer_cache.set.assert_awaited_once_with(
         _expected_key("onde comer?"), "Padaria Central"
@@ -255,7 +283,7 @@ async def test_should_run_pipeline_and_cache_answer_on_miss() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "answer", ["", "   ", PATTERN_RESPONSE, f"  {PATTERN_RESPONSE}\n"]
+    "answer", ["", "   "]
 )
 async def test_should_not_cache_empty_or_fallback_answer(answer: str) -> None:
     # Arrange
@@ -291,7 +319,7 @@ async def test_should_run_pipeline_when_cache_read_fails() -> None:
     answer = await service.search(HistoryChannel.WHATSAPP, "5535999", "onde comer?")
 
     # Assert
-    assert answer == "Padaria Central"
+    assert answer == _with_intro("Padaria Central")
     vectors.query.assert_awaited_once()
     openai.generate_chat_answer.assert_awaited_once()
 
@@ -396,7 +424,7 @@ async def test_should_return_semantic_answer_without_rag_or_llm() -> None:
     answer = await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
 
     # Assert
-    assert answer == "Marmitaria Central"
+    assert answer == _with_intro("Marmitaria Central")
     mocks.semantic_cache.find_answer.assert_awaited_once_with(EXPECTED_FINGERPRINT, [0.1, 0.2])
     mocks.vectors.query.assert_not_awaited()
     mocks.openai.generate_chat_answer.assert_not_awaited()
@@ -435,7 +463,7 @@ async def test_should_run_rag_and_store_in_both_caches_on_semantic_miss() -> Non
     answer = await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
 
     # Assert
-    assert answer == "Padaria Central"
+    assert answer == _with_intro("Padaria Central")
     mocks.vectors.query.assert_awaited_once_with([0.7, 0.8])
     mocks.openai.generate_chat_answer.assert_awaited_once()
     mocks.answer_cache.set.assert_awaited_once_with(_expected_key(QUESTION), "Padaria Central")
@@ -456,7 +484,7 @@ async def test_should_run_rag_when_all_semantic_matches_are_below_threshold() ->
     answer = await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
 
     # Assert
-    assert answer == "Padaria Central"
+    assert answer == _with_intro("Padaria Central")
     mocks.openai.generate_chat_answer.assert_awaited_once()
     mocks.answer_cache.set.assert_awaited_once_with(_expected_key(QUESTION), "Padaria Central")
     mocks.semantic_cache.store.assert_awaited_once()
@@ -478,13 +506,13 @@ async def test_should_return_joined_answers_of_matches_above_threshold() -> None
 
     # Assert
     expected = "Marmitaria Central\n\nMarmitaria do Bairro"
-    assert answer == expected
+    assert answer == _with_intro(expected)
     mocks.openai.generate_chat_answer.assert_not_awaited()
     mocks.answer_cache.set.assert_awaited_once_with(_expected_key(QUESTION), expected)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer", ["", "   ", PATTERN_RESPONSE])
+@pytest.mark.parametrize("answer", ["", "   "])
 async def test_should_not_store_non_cacheable_answer_in_any_cache(answer: str) -> None:
     # Arrange
     mocks = _mocks(answer=answer)

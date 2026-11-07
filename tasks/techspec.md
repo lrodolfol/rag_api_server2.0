@@ -268,6 +268,9 @@ os parametros devem vir do arquivo de configurações {env.json}
 ```        
 
 2.5 use o padrão de resposta de API conforme `@.agents\code_patterns\api.md`
+   - Antes de devolver, a resposta recebe uma introdução aleatória (`_ANSWER_MESSAGES`); resposta
+     vazia vira uma mensagem aleatória de "não encontrei" (`_NOT_FOUND_MESSAGES`). O histórico
+     guarda a resposta sem essas mensagens.
 
 
 
@@ -364,6 +367,9 @@ os parametros devem vir do arquivo de configurações {env.json}
 ```        
 
 3.6 use o padrão de resposta de API conforme `@.agents\code_patterns\api.md`
+   - Antes de devolver, a resposta recebe uma introdução aleatória (`_ANSWER_MESSAGES`); resposta
+     vazia vira uma mensagem aleatória de "não encontrei" (`_NOT_FOUND_MESSAGES`). O histórico
+     guarda a resposta sem essas mensagens.
 
 
 4.

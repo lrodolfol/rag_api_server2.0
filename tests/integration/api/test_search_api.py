@@ -20,12 +20,27 @@ from fastapi.testclient import TestClient
 from app.api.dependencies import get_rate_limiter, get_search_service
 from app.application.cache import SemanticCacheService
 from app.application.search import SearchService
+from app.application.search import service as search_service
 from app.infrastructure.config import FingerPrintConfig, PostgresConfig, SemanticCacheConfig
 from app.infrastructure.postgres import PostgresSemanticCacheRepository
 from app.infrastructure.pinecone import VectorMatch
 from app.infrastructure.rate_limit import InMemoryRateLimiter
 from app.infrastructure.redis import HistoryChannel, RedisAnswerCacheRepository
 from app.main import create_app
+
+INTRO = "Encontrei para você:"
+NOT_FOUND = "Nada encontrado."
+
+
+@pytest.fixture(autouse=True)
+def _fixed_search_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the random intro and not-found messages with a single fixed one."""
+    monkeypatch.setattr(search_service, "_ANSWER_MESSAGES", (INTRO,))
+    monkeypatch.setattr(search_service, "_NOT_FOUND_MESSAGES", (NOT_FOUND,))
+
+
+def _with_intro(answer: str) -> str:
+    return f"{INTRO}\n\n{answer}"
 
 
 class _FakeSearchService:
@@ -220,7 +235,7 @@ def test_should_embed_normalized_question_once_through_endpoint(
         body = _post_question(client, endpoint, RAW_QUESTION)
 
     # Assert
-    assert body["message"] == "Marmitaria Central"
+    assert body["message"] == _with_intro("Marmitaria Central")
     pipeline.openai.generate_embedding_for_question.assert_awaited_once_with(
         NORMALIZED_QUESTION
     )
@@ -242,7 +257,7 @@ def test_should_not_embed_again_when_answer_is_cached(
         body = _post_question(client, endpoint, NORMALIZED_QUESTION)
 
     # Assert
-    assert body["message"] == "Marmitaria Central"
+    assert body["message"] == _with_intro("Marmitaria Central")
     pipeline.openai.generate_embedding_for_question.assert_awaited_once()
 
 
@@ -264,7 +279,7 @@ def test_should_store_answer_in_both_caches_on_semantic_miss(
         redis_keys = client.portal.call(pipeline.redis.keys, "*")
 
     # Assert
-    assert body["message"] == "Marmitaria Central"
+    assert body["message"] == _with_intro("Marmitaria Central")
     pipeline.openai.generate_chat_answer.assert_awaited_once()
     assert len(redis_keys) == 1
     assert len(semantic_cache_db.rows) == 1
@@ -288,7 +303,7 @@ def test_should_answer_similar_question_from_semantic_cache(
         redis_keys = client.portal.call(pipeline.redis.keys, "*")
 
     # Assert: answered without RAG/LLM, Redis populated for the new question.
-    assert body["message"] == "Marmitaria Central"
+    assert body["message"] == _with_intro("Marmitaria Central")
     pipeline.openai.generate_chat_answer.assert_awaited_once()
     pipeline.vectors.query.assert_awaited_once()
     assert len(redis_keys) == 2
@@ -316,7 +331,7 @@ def test_should_run_rag_when_semantic_similarity_is_below_threshold(
         body = _post_question(client, endpoint, UNRELATED_QUESTION)
 
     # Assert: answered by the RAG pipeline and stored as a new semantic entry.
-    assert body["message"] == "Pizzaria Bella"
+    assert body["message"] == _with_intro("Pizzaria Bella")
     assert pipeline.openai.generate_chat_answer.await_count == 2
     assert pipeline.vectors.query.await_count == 2
     assert len(semantic_cache_db.rows) == 2
@@ -335,7 +350,7 @@ def test_should_not_query_semantic_cache_on_exact_hit(
         body = _post_question(client, endpoint, RAW_QUESTION)
 
     # Assert
-    assert body["message"] == "Marmitaria Central"
+    assert body["message"] == _with_intro("Marmitaria Central")
     assert semantic_cache_db.select_count == 1
 
 
@@ -353,6 +368,6 @@ def test_should_answer_through_rag_when_postgres_fails(
 
     # Assert
     assert response_body["status_code"] == 200
-    assert response_body["message"] == "Marmitaria Central"
+    assert response_body["message"] == _with_intro("Marmitaria Central")
     pipeline.openai.generate_chat_answer.assert_awaited_once()
     assert semantic_cache_db.rows == []

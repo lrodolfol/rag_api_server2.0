@@ -31,8 +31,8 @@ endpoints não muda.
      `generate_chat_answer`.
   3. **Miss:** executar o fluxo atual sem alterações (histórico → embeddings → Pinecone → chat →
      histórico).
-  4. Depois do miss, gravar no cache **somente** se a resposta não for vazia e for diferente de
-     `PATTERN_RESPONSE` (`app/domain/prompts.py`). A comparação deve ignorar espaços nas pontas.
+  4. Depois do miss, gravar no cache **somente** se a resposta não for vazia. A verificação deve
+     ignorar espaços nas pontas (resposta só com espaços conta como vazia).
 - O histórico continua sendo carregado e usado só no caminho de miss. No hit não é preciso ler o
   histórico; basta gravar o turno.
 - `search` deve continuar com menos de 30 linhas: extrair helpers privados
@@ -73,7 +73,7 @@ endpoints não muda.
 - Segunda pergunta idêntica (ou equivalente após a normalização), em qualquer canal, é respondida
   sem chamada à OpenAI e ao Pinecone.
 - No hit, o histórico do usuário recebe a pergunta e a resposta, igual ao fluxo normal.
-- Respostas vazias e `PATTERN_RESPONSE` nunca vão para o cache.
+- Respostas vazias (ou só com espaços) nunca vão para o cache.
 - Com o Redis fora do ar, a busca funciona como antes (sem cache).
 - Contrato dos endpoints `/whatsapp` e chat online inalterado; todos os testes que já existiam passam.
 
@@ -85,7 +85,7 @@ endpoints não muda.
     chamado para a pergunta e a resposta.
   - Miss: fluxo completo executado; `answer_cache.set` chamado com a chave e a resposta.
   - Miss com resposta vazia → `set` **não** chamado.
-  - Miss com `PATTERN_RESPONSE` (inclusive com espaços nas pontas) → `set` **não** chamado.
+  - Miss com resposta só com espaços → `set` **não** chamado.
   - Perguntas equivalentes após a normalização usam a mesma chave.
   - `get` devolvendo `None` por falha do Redis → fluxo normal.
 - [x] Testes de integração (`tests/integration/api/test_search_api.py` e/ou
@@ -105,7 +105,6 @@ endpoints não muda.
 - `app/api/dependencies.py`
 - `app/application/cache/fingerprint.py` (tarefa 2.0)
 - `app/infrastructure/redis/answer_cache_repository.py` (tarefa 3.0)
-- `app/domain/prompts.py` (`PATTERN_RESPONSE`, apenas leitura)
 - `tests/unit/search/test_search_service.py`
 - `tests/integration/api/test_search_api.py`
 - `tests/integration/api/test_e2e_flows.py`

@@ -11,6 +11,7 @@ external provider is contacted.
 
 from typing import Any
 
+import pytest
 from fakeredis import FakeAsyncRedis
 from fastapi.testclient import TestClient
 
@@ -24,6 +25,7 @@ from app.application.cache import SemanticCacheService
 from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
+from app.application.search import service as search_service
 from app.domain import (
     CompanyRegistrationRequest,
     EmbeddingRecord,
@@ -44,6 +46,21 @@ from app.infrastructure.redis import (
     RedisAnswerCacheRepository,
 )
 from app.main import create_app
+
+
+INTRO = "Encontrei para você:"
+NOT_FOUND = "Nada encontrado."
+
+
+@pytest.fixture(autouse=True)
+def _fixed_search_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the random intro and not-found messages with a single fixed one."""
+    monkeypatch.setattr(search_service, "_ANSWER_MESSAGES", (INTRO,))
+    monkeypatch.setattr(search_service, "_NOT_FOUND_MESSAGES", (NOT_FOUND,))
+
+
+def _with_intro(answer: str) -> str:
+    return f"{INTRO}\n\n{answer}"
 
 
 class _FakeOpenAIService:
@@ -301,7 +318,7 @@ def test_e2e_should_answer_whatsapp_message_through_real_service(semantic_cache_
 
     # Assert: answer returned and the turn was persisted on the WhatsApp channel.
     assert response.status_code == 200
-    assert response.json()["message"] == "Padaria Central"
+    assert response.json()["message"] == _with_intro("Padaria Central")
     assert openai.chat_phrases == [["Padaria Central"]]
     channels = {channel for channel, _, _ in history.appended}
     assert channels == {HistoryChannel.WHATSAPP}
@@ -341,7 +358,7 @@ def test_e2e_should_answer_online_chat_message_through_real_service(semantic_cac
 
     # Assert
     assert response.status_code == 200
-    assert response.json()["message"] == "Restaurante B"
+    assert response.json()["message"] == _with_intro("Restaurante B")
     channels = {channel for channel, _, _ in history.appended}
     assert channels == {HistoryChannel.ONLINE}
 
@@ -426,7 +443,7 @@ def test_e2e_should_answer_repeated_question_from_cache(semantic_cache_db: Any) 
         ttl = client.portal.call(redis_client.ttl, keys[0])
 
     # Assert: same answer, but OpenAI chat and embedding were called only once.
-    assert first.json()["message"] == second.json()["message"] == "Restaurante B"
+    assert first.json()["message"] == second.json()["message"] == _with_intro("Restaurante B")
     assert len(openai.chat_phrases) == 1
     assert openai.embedded_questions == ["onde comer?"]
     assert len(keys) == 1
@@ -458,7 +475,7 @@ def test_e2e_should_share_cache_between_whatsapp_and_online_chat(semantic_cache_
         online = client.post("/chat", json=_online_chat_body("onde comer?"))
 
     # Assert
-    assert whatsapp.json()["message"] == online.json()["message"] == "Padaria Central"
+    assert whatsapp.json()["message"] == online.json()["message"] == _with_intro("Padaria Central")
     assert len(openai.chat_phrases) == 1
 
 
@@ -492,7 +509,7 @@ def test_e2e_should_answer_from_semantic_then_exact_cache(semantic_cache_db: Any
 
     # Assert
     messages = [response.json()["message"] for response in (first, second, third)]
-    assert messages == ["Marmitaria Central"] * 3
+    assert messages == [_with_intro("Marmitaria Central")] * 3
     assert len(openai.chat_phrases) == 1
     assert rows_after_first == 1
     assert len(semantic_cache_db.rows) == 1

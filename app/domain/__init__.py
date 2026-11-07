@@ -30,7 +30,7 @@ from app.domain.exceptions import (
     RateLimitError,
     VectorRepositoryError,
 )
-from app.domain.prompts import INPUT_GUIDE, PATTERN_RESPONSE, QUERY_PREFIX
+from app.domain.prompts import INPUT_GUIDE, QUERY_PREFIX
 from app.domain.search import OnlineChatSearchPayload, WhatsAppSearchPayload
 
 __all__ = [
@@ -48,7 +48,6 @@ __all__ = [
     "MessageRole",
     "OnlineChatSearchPayload",
     "OpenIaException",
-    "PATTERN_RESPONSE",
     "PayloadQuestionOpenIA",
     "QUERY_PREFIX",
     "RateLimitError",

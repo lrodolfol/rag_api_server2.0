@@ -25,7 +25,7 @@ configured versions. Every external interaction is delegated to the existing
 infrastructure and cache services, so this layer only coordinates the steps
 without duplicating their logic.
 """
-
+from random import choice
 from typing import Final
 
 from app.application.cache import (
@@ -55,6 +55,35 @@ logger = get_logger(__name__)
 
 _LOGGED_KEY_LENGTH: Final[int] = 8
 _ANSWER_SEPARATOR: Final[str] = "\n\n"
+_NOT_FOUND_MESSAGES: Final[tuple[str, ...]] = (
+    "Não encontrei resultados para sua busca. Que tal tentar de outra forma?",
+    "Poxa, não encontrei opções relacionadas à sua pesquisa.",
+    "Não localizei estabelecimentos que correspondam à sua busca.",
+    "Ops, não encontrei nenhuma referência, mas podemos tentar outro tema!",
+    "Que tal tentar com outras palavras?",
+    "Talvez utilizando outros termos eu consiga encontrar o que procura.",
+    "Dessa vez você não teve sorte na busca. Vamos tentar com outra busca?",
+    "Não encontrei o que você procura desta vez. Vamos tentar novamente?",
+)
+_ANSWER_MESSAGES: Final[tuple[str, ...]] = (
+    "Encontrei algumas opções que podem atender à sua necessidade!",
+    "Boa notícia! Encontrei alguns estabelecimentos para você.",
+    "Separei algumas opções que podem ser interessantes para você.",
+    "Encontrei alguns resultados relacionados à sua busca. Confira!",
+    "Tenho algumas sugestões que podem ajudar você!",
+    "Olha só o que encontrei para você!",
+    "Encontrei algumas opções interessantes. Vamos conferir?",
+    "Achei algumas alternativas que podem ser exatamente o que você procura!",
+    "Tenho algumas sugestões para facilitar sua busca.",
+    "Dá uma olhada nessas opções que encontrei!",
+    "Encontrei opções que podem atender você!",
+    "Localizei certas respostas relacionadas à sua busca.",
+    "Encontrei boas opções próximas ao que você procura.",
+    "Separei alguns serviços que podem ser úteis para você.",
+    "Encontrei uma opção que pode atender à sua necessidade!",
+    "Localizei resultados relevantes para sua busca.",
+    "Essas opções podem ajudar você.",
+)
 
 
 class SearchService:
@@ -91,6 +120,10 @@ class SearchService:
                 channel, user_key, question, fingerprint, cache_key
             )
         await self._persist_turn(channel, user_key, question, answer)
+        if answer.strip():
+            answer = f"{choice(_ANSWER_MESSAGES)}{_ANSWER_SEPARATOR}{answer}"
+        else:
+            answer = choice(_NOT_FOUND_MESSAGES)
         return answer
 
     async def _get_cached_answer(

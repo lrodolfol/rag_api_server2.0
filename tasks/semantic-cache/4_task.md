@@ -33,7 +33,7 @@ Depende das tarefas 1.0, 2.0 e 3.0.
   - `async store(fingerprint, question, answer, embedding) -> None`: monta o
     `SemanticCacheEntry` (`uuid4()`, `created_at` = agora) e grava. Não grava respostas não
     cacheáveis.
-- Regra "resposta cacheável" (vazia ou `PATTERN_RESPONSE`) em **um único lugar**, compartilhada
+- Regra "resposta cacheável" (não vazia, ignorando espaços) em **um único lugar**, compartilhada
   pelo Redis e pelo cache semântico — mover o `_is_cacheable` atual para uma função pura
   reutilizável (ex.: em `app/application/cache/`), sem duplicar.
 - `SearchService` recebe `semantic_cache: SemanticCacheService` e implementa o fluxo:
@@ -77,7 +77,7 @@ Depende das tarefas 1.0, 2.0 e 3.0.
 - Hit exato não consulta o cache semântico nem gera embedding.
 - Hit semântico não chama Pinecone nem LLM, grava histórico e popula o Redis com a chave da pergunta atual.
 - Miss semântico executa o RAG e grava no Redis e no PostgreSQL, uma vez, após a LLM.
-- Respostas vazias e `PATTERN_RESPONSE` não vão para nenhum dos caches.
+- Respostas vazias (ou só com espaços) não vão para nenhum dos caches.
 - Falha do PostgreSQL resulta no fluxo normal de RAG e a resposta chega ao usuário.
 - O embedding é gerado no máximo uma vez por requisição.
 - Toda a suíte de testes passa.
@@ -89,7 +89,7 @@ Depende das tarefas 1.0, 2.0 e 3.0.
     - `find_answer` devolve a resposta do primeiro resultado; `None` quando a lista é vazia.
     - `store` monta o `SemanticCacheEntry` com uuid, `created_at`, fingerprint, pergunta original,
       resposta e embedding.
-    - `store` não chama o repositório para resposta vazia ou `PATTERN_RESPONSE`.
+    - `store` não chama o repositório para resposta vazia ou só com espaços.
   - `tests/unit/search/test_search_service.py`:
     - Hit exato: cache semântico e embedding não são chamados.
     - Hit semântico: retorna a resposta armazenada; Pinecone e LLM não são chamados; histórico
@@ -113,7 +113,6 @@ Depende das tarefas 1.0, 2.0 e 3.0.
 - `app/application/cache/__init__.py`
 - `app/application/search/service.py`
 - `app/api/dependencies.py`
-- `app/domain/prompts.py` (apenas leitura — `PATTERN_RESPONSE`)
 - `app/infrastructure/postgres/semantic_cache_repository.py` (apenas leitura)
 - `tests/unit/cache/test_semantic_cache_service.py` (novo)
 - `tests/unit/search/test_search_service.py`

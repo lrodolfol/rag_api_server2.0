@@ -83,8 +83,6 @@ class OpenAIService:
             return ""
         logger.info("Sending chat completion request to OpenAI (context_phrases=%d)", len(phrases))
         answer = await self._create_response(self._build_chat_input(payload, phrases))
-        if not answer:
-            raise OpenIaException("No answer returned from the OpenAI provider")
         logger.info("Chat completion response received from OpenAI")
         return answer
 

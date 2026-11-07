@@ -31,7 +31,15 @@ Os arquivos de tarefa apenas referenciam esses documentos — não repetem a imp
   3. grava a resposta no Redis com a chave do fingerprint da pergunta atual.
 - **Miss semântico:** fluxo normal de RAG + LLM; a resposta é gravada no Redis **e** no
   PostgreSQL (somente após a resposta da LLM).
-- **Não são gravadas** (Redis nem PostgreSQL): respostas vazias e `PATTERN_RESPONSE`.
+- **Não são gravadas** (Redis nem PostgreSQL): respostas vazias (ou só com espaços).
+- **Mensagens aleatórias na resposta ao usuário:** depois de gravar o histórico, o `SearchService`
+  (`app/application/search/service.py`) decora a resposta com uma mensagem sorteada (`random.choice`):
+  - resposta com conteúdo → uma introdução de `_ANSWER_MESSAGES` + `"\n\n"` + a resposta;
+  - resposta vazia (ou só com espaços) → uma mensagem de `_NOT_FOUND_MESSAGES` no lugar da resposta.
+  O histórico, o Redis e o PostgreSQL guardam **sempre a resposta pura**, sem a mensagem; por isso
+  um cache hit também recebe uma introdução nova a cada requisição. Nos testes, as tuplas são
+  substituídas por uma única mensagem fixa (fixture `_fixed_search_messages`) para manter o
+  resultado determinístico.
 - **Registro gravado:** `id` (uuid4), `prompt_version`, `rules_version`, `model_capability`,
   `input_text` (pergunta original), `normalized_text`, `response_json` (texto da resposta
   serializado como string JSON), `embedding`, `created_at`.

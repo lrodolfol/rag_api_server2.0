@@ -17,6 +17,6 @@ client_payload = [
 
 O campo `input_guide` em `env.json` usa o placeholder `'response_answer'` para indicar onde a mensagem de fallback deve aparecer.
 
-O campo `pattern_response` em `env.json` contém o texto real que será exibido ao usuário quando não houver resposta na base de conhecimento.
+O campo `pattern_response` em `env.json` contém o texto real que será exibido ao usuário quando não houver resposta na base de conhecimento.corri
 
 A substituição ocorre em `OpenAIConfig._substitute_pattern_response` (validador Pydantic `model_validator`) e acontece **uma única vez**, na carga da configuração. O `OpenAIService` recebe o `input_guide` já com o texto final, sem necessidade de qualquer lógica adicional.

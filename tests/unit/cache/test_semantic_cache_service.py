@@ -8,7 +8,6 @@ import pytest
 
 from app.application.cache import SemanticCacheService, is_cacheable_answer
 from app.domain import (
-    PATTERN_RESPONSE,
     CacheFingerprint,
     SemanticCacheEntry,
     SemanticCacheMatch,
@@ -111,7 +110,7 @@ async def test_should_generate_a_new_id_for_each_entry() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer", ["", "   ", PATTERN_RESPONSE, f"  {PATTERN_RESPONSE}\n"])
+@pytest.mark.parametrize("answer", ["", "   "])
 async def test_should_not_store_empty_or_fallback_answer(answer: str) -> None:
     # Arrange
     service, repository = _service()
@@ -125,7 +124,7 @@ async def test_should_not_store_empty_or_fallback_answer(answer: str) -> None:
 
 @pytest.mark.parametrize(
     ("answer", "expected"),
-    [("Padaria Central", True), ("", False), ("  \n", False), (PATTERN_RESPONSE, False)],
+    [("Padaria Central", True), ("", False), ("  \n", False)],
 )
 def test_should_classify_cacheable_answers(answer: str, expected: bool) -> None:
     # Act / Assert

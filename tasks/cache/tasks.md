@@ -28,8 +28,16 @@ Os arquivos de tarefa apenas referenciam esses documentos — não repetem a imp
   **Não** haverá endpoint de limpeza.
 - **Cache hit:** a resposta é devolvida sem chamar OpenAI (embedding e chat) nem Pinecone, mas a
   pergunta e a resposta **continuam sendo gravadas no histórico** do usuário.
-- **Escrita no cache:** respostas vazias e `PATTERN_RESPONSE` (`app/domain/prompts.py`) **não** são
-  cacheadas.
+- **Escrita no cache:** respostas vazias (ou só com espaços) **não** são cacheadas. Quando a
+  pergunta não está na base, a LLM devolve resposta vazia (`INPUT_GUIDE` em `app/domain/prompts.py`).
+- **Mensagens aleatórias na resposta ao usuário:** depois de gravar o histórico, o `SearchService`
+  (`app/application/search/service.py`) decora a resposta com uma mensagem sorteada (`random.choice`):
+  - resposta com conteúdo → uma introdução de `_ANSWER_MESSAGES` + `"\n\n"` + a resposta;
+  - resposta vazia (ou só com espaços) → uma mensagem de `_NOT_FOUND_MESSAGES` no lugar da resposta.
+  O histórico, o Redis e o PostgreSQL guardam **sempre a resposta pura**, sem a mensagem; por isso
+  um cache hit também recebe uma introdução nova a cada requisição. Nos testes, as tuplas são
+  substituídas por uma única mensagem fixa (fixture `_fixed_search_messages`) para manter o
+  resultado determinístico.
 - **O cache é compartilhado entre os canais** (WhatsApp e chat online): a chave não depende do
   canal nem do usuário.
 - **Falha do Redis não derruba a requisição:** erro na leitura = cache miss; erro na escrita =

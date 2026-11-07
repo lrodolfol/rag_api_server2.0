@@ -18,6 +18,8 @@ Os arquivos de tarefa apenas referenciam esses documentos — não repetem a imp
 - **Vários resultados aceitos:** as respostas são **deduplicadas** (texto idêntico aparece uma
   única vez), mantendo a ordem do repositório (mais similar primeiro), e concatenadas em uma
   única string separadas por **quebra dupla de linha** (`"\n\n"`).
+  A introdução aleatória é aplicada depois, sobre a string já concatenada (ver
+  `../cache/tasks.md`, "Mensagens aleatórias na resposta ao usuário").
 - **Nenhum resultado aceito** (ou lista vazia) = **miss semântico**: segue o fluxo normal de
   RAG + LLM, exatamente como hoje.
 - **Hit semântico** (pelo menos um resultado aceito): mantém o comportamento atual — retorna a
