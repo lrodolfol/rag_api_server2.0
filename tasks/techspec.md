@@ -271,6 +271,10 @@ os parametros devem vir do arquivo de configurações {env.json}
    - Antes de devolver, a resposta recebe uma introdução aleatória (`_ANSWER_MESSAGES`); resposta
      vazia vira uma mensagem aleatória de "não encontrei" (`_NOT_FOUND_MESSAGES`). O histórico
      guarda a resposta sem essas mensagens.
+   - Mensagem curta (menos de 2 letras, por exemplo `"..."`, `"!!"` ou `"1234"`) é identificada
+     sem chamar a LLM (`is_short_message` em `app/application/text_processing`). O cliente recebe
+     uma única mensagem aleatória de `_INVALID_MESSAGE_RESPONSES`, e a mensagem não passa por
+     cache, embedding, Pinecone ou OpenAI, nem é gravada no histórico.
 
 
 
@@ -370,6 +374,10 @@ os parametros devem vir do arquivo de configurações {env.json}
    - Antes de devolver, a resposta recebe uma introdução aleatória (`_ANSWER_MESSAGES`); resposta
      vazia vira uma mensagem aleatória de "não encontrei" (`_NOT_FOUND_MESSAGES`). O histórico
      guarda a resposta sem essas mensagens.
+   - Mensagem curta (menos de 2 letras, por exemplo `"..."`, `"!!"` ou `"1234"`) é identificada
+     sem chamar a LLM (`is_short_message` em `app/application/text_processing`). O cliente recebe
+     uma única mensagem aleatória de `_INVALID_MESSAGE_RESPONSES`, e a mensagem não passa por
+     cache, embedding, Pinecone ou OpenAI, nem é gravada no histórico.
 
 
 4.

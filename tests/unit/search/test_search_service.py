@@ -689,3 +689,77 @@ def test_should_return_none_when_accepted_answers_have_no_items() -> None:
 
     # Act / Assert
     assert SearchService.threshold_evaluate(matches) is None
+
+
+# --- Short messages (answered without any LLM call) -------------------------
+
+SHORT_MESSAGES = ["...", "i", "!!", "1234", " ", "   "]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("question", SHORT_MESSAGES)
+async def test_should_reply_with_single_invalid_message_hint_for_short_message(
+    question: str,
+) -> None:
+    # Arrange
+    mocks = _mocks()
+
+    # Act
+    result = await mocks.service.search(HistoryChannel.ONLINE, "123", question)
+
+    # Assert
+    assert len(result) == 1
+    assert result[0] in search_service._INVALID_MESSAGE_RESPONSES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("channel", [HistoryChannel.ONLINE, HistoryChannel.WHATSAPP])
+async def test_should_not_touch_any_dependency_for_short_message(
+    channel: HistoryChannel,
+) -> None:
+    # Arrange
+    mocks = _mocks()
+
+    # Act
+    await mocks.service.search(channel, "123", "...")
+
+    # Assert
+    mocks.answer_cache.get.assert_not_awaited()
+    mocks.answer_cache.set.assert_not_awaited()
+    mocks.openai.generate_embedding_for_question.assert_not_awaited()
+    mocks.openai.generate_chat_answer.assert_not_awaited()
+    mocks.semantic_cache.find_answer.assert_not_awaited()
+    mocks.semantic_cache.store.assert_not_awaited()
+    mocks.vectors.query.assert_not_awaited()
+    mocks.history.get_history.assert_not_awaited()
+    mocks.history.append_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_not_log_short_message_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    mocks = _mocks()
+    caplog.set_level(logging.INFO)
+
+    # Act
+    await mocks.service.search(HistoryChannel.WHATSAPP, "123", "?!?#")
+
+    # Assert
+    assert "Short message received" in caplog.text
+    assert "?!?#" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_run_pipeline_for_two_letter_message() -> None:
+    # Arrange
+    mocks = _mocks()
+
+    # Act
+    result = await mocks.service.search(HistoryChannel.ONLINE, "123", "oi")
+
+    # Assert
+    assert result == [INTRO, "Padaria Central"]
+    mocks.openai.generate_chat_answer.assert_awaited_once()
+    mocks.history.append_message.assert_awaited()

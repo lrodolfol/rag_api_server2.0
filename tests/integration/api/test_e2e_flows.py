@@ -532,3 +532,34 @@ def test_e2e_should_answer_from_semantic_then_exact_cache(semantic_cache_db: Any
     assert semantic_cache_db.select_count == 2
     assert openai.embedded_questions == ["onde vende marmitas?", "onde posso comprar marmitas?"]
     assert len(history.appended) == 6
+
+
+# --- Short messages -----------------------------------------------------------
+
+
+def test_e2e_should_keep_short_message_out_of_history(semantic_cache_db: Any) -> None:
+    # Arrange
+    openai = _FakeOpenAIService(answer="Restaurante B")
+    vectors = _FakeVectorRepository(
+        matches=[VectorMatch(id="v2", score=0.93, text="Restaurante B", user_code="2")]
+    )
+    history = _FakeHistoryRepository()
+    service = _search_service(openai, vectors, history)
+    app = create_app()
+    app.dependency_overrides[get_search_service] = lambda: service
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
+    client = TestClient(app)
+
+    # Act
+    short = client.post("/chat", json=_online_chat_body("..."))
+    valid = client.post("/chat", json=_online_chat_body("onde comer?"))
+
+    # Assert
+    short_messages = _sse_messages(short)
+    assert len(short_messages) == 1
+    assert short_messages[0] in search_service._INVALID_MESSAGE_RESPONSES
+    assert _sse_messages(valid) == [INTRO, "Restaurante B"]
+    assert openai.embedded_questions == ["onde comer?"]
+    stored_texts = [message.text for _, _, message in history.appended]
+    assert "..." not in stored_texts
+    assert stored_texts[0] == "onde comer?"

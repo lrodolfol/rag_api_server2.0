@@ -455,3 +455,48 @@ def test_should_answer_through_rag_when_postgres_fails(
     assert _sse_messages(response) == [INTRO, "Marmitaria Central"]
     pipeline.openai.generate_chat_answer.assert_awaited_once()
     assert semantic_cache_db.rows == []
+
+
+# --- Short messages (answered without any LLM call) -------------------------
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+@pytest.mark.parametrize("question", ["...", "i", "!!", "1234", " ", "   "])
+def test_should_stream_single_invalid_message_hint_for_short_message(
+    endpoint: str, question: str
+) -> None:
+    # Arrange: the real service; no PostgreSQL fixture is needed because a short
+    # message never reaches the semantic cache.
+    pipeline = _Pipeline()
+
+    # Act
+    with pipeline.client() as client:
+        messages = _post_question(client, endpoint, question)
+
+    # Assert
+    assert len(messages) == 1
+    assert messages[0] in search_service._INVALID_MESSAGE_RESPONSES
+    pipeline.openai.generate_embedding_for_question.assert_not_awaited()
+    pipeline.openai.generate_chat_answer.assert_not_awaited()
+    pipeline.vectors.query.assert_not_awaited()
+    pipeline.history.get_history.assert_not_awaited()
+    pipeline.history.append_message.assert_not_awaited()
+
+
+def test_should_count_short_messages_towards_online_chat_rate_limit() -> None:
+    # Arrange: max 2 messages per window, all from the same IP.
+    pipeline = _Pipeline()
+    limiter = InMemoryRateLimiter(max_messages=2)
+    app = create_app()
+    app.dependency_overrides[get_search_service] = lambda: pipeline.service
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    client = TestClient(app)
+
+    # Act
+    allowed = [_post(client, "/chat", "...").status_code for _ in range(2)]
+    blocked = _post(client, "/chat", "...")
+
+    # Assert
+    assert allowed == [200, 200]
+    assert blocked.status_code == 429
+    assert "rate_limit_exceeded" in blocked.json()["errors"]

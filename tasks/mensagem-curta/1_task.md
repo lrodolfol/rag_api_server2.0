@@ -37,11 +37,11 @@ integração.
 
 ## Subtarefas
 
-- [ ] 1.1 Criar a constante do mínimo de letras e a função `is_short_message`.
-- [ ] 1.2 Exportar a função e a constante em `app/application/text_processing/__init__.py`.
-- [ ] 1.3 Criar os testes unitários parametrizados.
-- [ ] 1.4 Criar o teste de integração do pacote.
-- [ ] 1.5 Rodar os testes, o lint e o type checking dentro do `.venv`.
+- [x] 1.1 Criar a constante do mínimo de letras e a função `is_short_message`.
+- [x] 1.2 Exportar a função e a constante em `app/application/text_processing/__init__.py`.
+- [x] 1.3 Criar os testes unitários parametrizados.
+- [x] 1.4 Criar o teste de integração do pacote.
+- [x] 1.5 Rodar os testes, o lint e o type checking dentro do `.venv`.
 
 ## Detalhes de Implementação
 
@@ -60,11 +60,11 @@ que `char.isalpha()` é verdadeiro e compara o total com a constante. Não é pr
 
 ## Testes da Tarefa
 
-- [ ] Testes de unidade: em `tests/unit/text_processing/` (no `test_text_processor.py` existente
+- [x] Testes de unidade: em `tests/unit/text_processing/` (no `test_text_processor.py` existente
   ou em um novo `test_message_validator.py`), um teste parametrizado com os casos curtos (`True`) e
   outro com os casos válidos (`False`), incluindo acentos, números, pontuação, emojis e espaços nas
   pontas.
-- [ ] Testes de integração: em `tests/integration/text_processing/`, importar
+- [x] Testes de integração: em `tests/integration/text_processing/`, importar
   `is_short_message` pelo pacote `app.application.text_processing` e validar um caso curto e um
   válido. Assim, a exportação pública fica garantida.
 - [ ] Testes E2E: não se aplica. O fluxo HTTP é coberto na tarefa 2.0.

@@ -3,6 +3,10 @@
 Orchestrates the single retrieval-augmented-generation pipeline shared by the
 WhatsApp and online-chat endpoints, so the flow is defined once:
 
+* reject short messages (fewer than two letters, e.g. ``"..."`` or ``"1234"``)
+  without calling the language model: the client receives a single random
+  ``_INVALID_MESSAGE_RESPONSES`` hint and nothing else runs (no cache, history,
+  embedding, vector search or OpenAI call, and nothing is persisted);
 * look up the exact answer cache by the question fingerprint; the stored
   ``{"respostas": [...]}`` JSON is parsed into a :class:`ChatAnswer` (hit
   returns early, without embedding the question or consulting the semantic
@@ -40,6 +44,7 @@ from app.application.cache import (
     build_fingerprint,
     is_cacheable_answer,
 )
+from app.application.text_processing import is_short_message
 from app.domain import (
     CacheFingerprint,
     ChatAnswer,
@@ -91,6 +96,23 @@ _ANSWER_MESSAGES: Final[tuple[str, ...]] = (
     "Localizei resultados relevantes para sua busca.",
     "Essas opções podem ajudar você.",
 )
+_INVALID_MESSAGE_RESPONSES: Final[tuple[str, ...]] = (
+    "Opa! Não consegui entender sua mensagem. Pode tentar novamente?",
+    "Hmm... Acho que sua mensagem ficou um pouquinho curta. Pode me contar mais?",
+    "Estou aqui para ajudar! Que tal escrever um pouco mais sobre o que procura?",
+    "Ops! Não consegui identificar sua dúvida. Pode explicar melhor?",
+    "Vamos tentar novamente? Me conte um pouquinho mais sobre o que você precisa!",
+    "Sua mensagem parece estar incompleta. Pode enviar novamente?",
+    "Quero muito ajudar! Mas preciso de um pouco mais de informação.",
+    "Não consegui entender muito bem. Poderia reformular sua mensagem?",
+    "Pode me dar mais detalhes? Assim consigo encontrar informações melhores para você!",
+    "Acho que faltou alguma informação. Que tal tentar novamente?",
+    "Estou pronto para ajudar! Só preciso entender melhor o que você procura.",
+    "Eita! Não consegui compreender sua mensagem. Pode escrever de outra forma?",
+    "Vamos lá! Me conte um pouco mais para que eu possa ajudar você.",
+    "Sua mensagem ficou um pouco vaga. Pode explicar melhor o que deseja saber?",
+    "Não consegui identificar o que você precisa. Tente enviar uma pergunta mais completa!",
+)
 
 
 class SearchService:
@@ -118,6 +140,8 @@ class SearchService:
         self, channel: HistoryChannel, user_key: str, question: str
     ) -> list[str]:
         """Return the client messages from a cached answer or the full RAG pipeline."""
+        if is_short_message(question):
+            return self._short_message_reply(channel)
         logger.info("Starting RAG pipeline for channel='%s'", channel.value)
         fingerprint = build_fingerprint(question, self._fingerprint_config)
         cache_key = build_cache_key(fingerprint)
@@ -128,6 +152,12 @@ class SearchService:
             )
         await self._persist_turn(channel, user_key, question, answer)
         return self._to_client_messages(answer)
+
+    @staticmethod
+    def _short_message_reply(channel: HistoryChannel) -> list[str]:
+        """Answer a content-less message with a random hint, skipping the whole pipeline."""
+        logger.info("Short message received for channel='%s', skipping RAG pipeline", channel.value)
+        return [choice(_INVALID_MESSAGE_RESPONSES)]
 
     @staticmethod
     def _to_client_messages(answer: ChatAnswer) -> list[str]:
