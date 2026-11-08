@@ -6,14 +6,17 @@ orchestration through the real routes, global exception handlers and response
 envelope. Only the external dependencies (OpenAI, Pinecone, Redis, S3 and the
 PostgreSQL semantic cache via the ``semantic_cache_db`` fixture) are replaced
 with in-memory fakes, so the full application wiring is covered while no
-external provider is contacted.
+external provider is contacted. Search answers arrive as Server-Sent Events
+streams and are decoded event by event, with the delay between events removed.
 """
 
+import json
 from typing import Any
 
 import pytest
 from fakeredis import FakeAsyncRedis
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app.api.dependencies import (
     get_deletion_service,
@@ -21,12 +24,14 @@ from app.api.dependencies import (
     get_registration_service,
     get_search_service,
 )
+from app.api.patterns import streaming
 from app.application.cache import SemanticCacheService
 from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
 from app.application.search import service as search_service
 from app.domain import (
+    ChatAnswer,
     CompanyRegistrationRequest,
     EmbeddingRecord,
     MessageHistoryItem,
@@ -59,8 +64,19 @@ def _fixed_search_messages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(search_service, "_NOT_FOUND_MESSAGES", (NOT_FOUND,))
 
 
-def _with_intro(answer: str) -> str:
-    return f"{INTRO}\n\n{answer}"
+@pytest.fixture(autouse=True)
+def _no_stream_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove the pause between SSE events so the tests never wait."""
+    monkeypatch.setattr(streaming, "STREAM_DELAY_SECONDS", 0)
+
+
+def _sse_messages(response: Response) -> list[str]:
+    """Assert a successful SSE answer and decode the message of each event."""
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = [event for event in response.text.split("\n\n") if event]
+    assert all(event.startswith("data: ") for event in events)
+    return [json.loads(event.removeprefix("data: "))["message"] for event in events]
 
 
 class _FakeOpenAIService:
@@ -88,9 +104,9 @@ class _FakeOpenAIService:
 
     async def generate_chat_answer(
         self, payload: PayloadQuestionOpenIA, phrases: list[str]
-    ) -> str:
+    ) -> ChatAnswer:
         self.chat_phrases.append(phrases)
-        return self._answer
+        return ChatAnswer(respostas=[self._answer])
 
 
 class _FakeVectorRepository:
@@ -317,8 +333,7 @@ def test_e2e_should_answer_whatsapp_message_through_real_service(semantic_cache_
     )
 
     # Assert: answer returned and the turn was persisted on the WhatsApp channel.
-    assert response.status_code == 200
-    assert response.json()["message"] == _with_intro("Padaria Central")
+    assert _sse_messages(response) == [INTRO, "Padaria Central"]
     assert openai.chat_phrases == [["Padaria Central"]]
     channels = {channel for channel, _, _ in history.appended}
     assert channels == {HistoryChannel.WHATSAPP}
@@ -357,8 +372,7 @@ def test_e2e_should_answer_online_chat_message_through_real_service(semantic_cac
     )
 
     # Assert
-    assert response.status_code == 200
-    assert response.json()["message"] == _with_intro("Restaurante B")
+    assert _sse_messages(response) == [INTRO, "Restaurante B"]
     channels = {channel for channel, _, _ in history.appended}
     assert channels == {HistoryChannel.ONLINE}
 
@@ -395,7 +409,7 @@ def test_e2e_should_return_safe_envelope_for_unexpected_error() -> None:
     class _BrokenSearchService:
         async def search(
             self, channel: HistoryChannel, user_key: str, question: str
-        ) -> str:
+        ) -> list[str]:
             raise ValueError("unexpected boom with internal detail")
 
     app = create_app()
@@ -443,7 +457,7 @@ def test_e2e_should_answer_repeated_question_from_cache(semantic_cache_db: Any) 
         ttl = client.portal.call(redis_client.ttl, keys[0])
 
     # Assert: same answer, but OpenAI chat and embedding were called only once.
-    assert first.json()["message"] == second.json()["message"] == _with_intro("Restaurante B")
+    assert _sse_messages(first) == _sse_messages(second) == [INTRO, "Restaurante B"]
     assert len(openai.chat_phrases) == 1
     assert openai.embedded_questions == ["onde comer?"]
     assert len(keys) == 1
@@ -475,7 +489,7 @@ def test_e2e_should_share_cache_between_whatsapp_and_online_chat(semantic_cache_
         online = client.post("/chat", json=_online_chat_body("onde comer?"))
 
     # Assert
-    assert whatsapp.json()["message"] == online.json()["message"] == _with_intro("Padaria Central")
+    assert _sse_messages(whatsapp) == _sse_messages(online) == [INTRO, "Padaria Central"]
     assert len(openai.chat_phrases) == 1
 
 
@@ -508,8 +522,8 @@ def test_e2e_should_answer_from_semantic_then_exact_cache(semantic_cache_db: Any
         keys = client.portal.call(redis_client.keys, f"{ANSWER_CACHE_KEY_PREFIX}:*")
 
     # Assert
-    messages = [response.json()["message"] for response in (first, second, third)]
-    assert messages == [_with_intro("Marmitaria Central")] * 3
+    messages = [_sse_messages(response) for response in (first, second, third)]
+    assert messages == [[INTRO, "Marmitaria Central"]] * 3
     assert len(openai.chat_phrases) == 1
     assert rows_after_first == 1
     assert len(semantic_cache_db.rows) == 1

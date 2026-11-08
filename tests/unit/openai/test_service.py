@@ -1,5 +1,6 @@
 """Unit tests for :class:`OpenAIService` using a mocked provider client."""
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,6 +10,7 @@ from pydantic import SecretStr
 
 from app.domain import (
     INPUT_GUIDE,
+    ChatAnswer,
     MessageHistoryItem,
     MessageRole,
     OpenIaException,
@@ -160,22 +162,83 @@ async def test_should_return_empty_vector_for_blank_question() -> None:
 
 
 @pytest.mark.asyncio
-async def test_should_generate_chat_answer() -> None:
+async def test_should_generate_chat_answer_from_json() -> None:
     # Arrange
-    client = _client_with_response("resposta final")
+    client = _client_with_response('{"respostas": ["Padaria Central", "Café São João"]}')
     payload = PayloadQuestionOpenIA(question="onde comer?")
 
     # Act
     answer = await _service_with(client).generate_chat_answer(payload, ["trecho 1"])
 
     # Assert
-    assert answer == "resposta final"
+    assert answer == ChatAnswer(respostas=["Padaria Central", "Café São João"])
+
+
+@pytest.mark.asyncio
+async def test_should_request_json_object_format_on_chat() -> None:
+    # Arrange
+    client = _client_with_response('{"respostas": []}')
+    payload = PayloadQuestionOpenIA(question="onde comer?")
+
+    # Act
+    await _service_with(client).generate_chat_answer(payload, [])
+
+    # Assert
+    call = client.responses.create.await_args
+    assert call.kwargs["text"] == {"format": {"type": "json_object"}}
+
+
+@pytest.mark.asyncio
+async def test_should_not_request_json_format_on_moderation() -> None:
+    # Arrange
+    client = _client_with_response('{"insult": false, "insult_text": ""}')
+
+    # Act
+    await _service_with(client).moderate("empresa")
+
+    # Assert
+    assert "text" not in client.responses.create.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_should_parse_chat_answer_wrapped_in_code_fence() -> None:
+    # Arrange
+    client = _client_with_response('```json\n{"respostas": ["a", "b"]}\n```')
+    payload = PayloadQuestionOpenIA(question="onde comer?")
+
+    # Act
+    answer = await _service_with(client).generate_chat_answer(payload, [])
+
+    # Assert
+    assert answer.respostas == ["a", "b"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw_answer",
+    ["resposta secreta em texto puro", '{"outra_chave": ["resposta secreta"]}'],
+)
+async def test_should_return_empty_answer_and_log_error_for_invalid_json(
+    raw_answer: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange
+    client = _client_with_response(raw_answer)
+    payload = PayloadQuestionOpenIA(question="pergunta")
+
+    # Act
+    with caplog.at_level(logging.DEBUG):
+        answer = await _service_with(client).generate_chat_answer(payload, [])
+
+    # Assert
+    assert answer.is_empty() is True
+    assert any(record.levelno == logging.ERROR for record in caplog.records)
+    assert "resposta secreta" not in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_should_build_chat_input_with_guide_history_and_matches() -> None:
     # Arrange
-    client = _client_with_response("ok")
+    client = _client_with_response('{"respostas": ["ok"]}')
     payload = PayloadQuestionOpenIA(
         question="e sobremesa?",
         chat_historic=[
@@ -210,19 +273,22 @@ async def test_should_return_empty_answer_for_invalid_payload() -> None:
     answer = await _service_with(client).generate_chat_answer(payload, [])
 
     # Assert
-    assert answer == ""
+    assert answer == ChatAnswer()
     client.responses.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_should_raise_when_chat_answer_is_empty() -> None:
+@pytest.mark.parametrize("raw_answer", ["", "   "])
+async def test_should_return_empty_answer_when_chat_response_is_empty(raw_answer: str) -> None:
     # Arrange
-    client = _client_with_response("")
+    client = _client_with_response(raw_answer)
     payload = PayloadQuestionOpenIA(question="pergunta")
 
-    # Act / Assert
-    with pytest.raises(OpenIaException):
-        await _service_with(client).generate_chat_answer(payload, [])
+    # Act
+    answer = await _service_with(client).generate_chat_answer(payload, [])
+
+    # Assert
+    assert answer == ChatAnswer()
 
 
 @pytest.mark.asyncio

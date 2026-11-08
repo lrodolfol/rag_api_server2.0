@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.domain import CacheFingerprint, SemanticCacheEntry
+from app.domain import CacheFingerprint, ChatAnswer, SemanticCacheEntry
 from app.infrastructure.config import PostgresConfig, SemanticCacheConfig
 from app.infrastructure.postgres import PostgresSemanticCacheRepository
 
@@ -119,3 +119,20 @@ async def test_should_compose_sql_with_configured_table_name(
     assert f'FROM "{TABLE}" c' in select_sql
     assert "ORDER BY c.embedding <=> q.value" in select_sql
     assert "LIMIT %(limit)s" in select_sql
+
+
+@pytest.mark.asyncio
+async def test_should_store_and_read_chat_answer_json_response(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    repository = _repository()
+    answer = ChatAnswer(respostas=["Marmitaria São João", "Marmitaria Central"])
+    await repository.save(_entry("Onde vende marmitas?", answer.to_json(), [1.0, 0.0]))
+
+    # Act
+    matches = await repository.find_nearest([1.0, 0.0], _fingerprint("onde vende marmitas?"))
+
+    # Assert
+    assert len(matches) == 1
+    assert ChatAnswer.from_json(matches[0].response) == answer

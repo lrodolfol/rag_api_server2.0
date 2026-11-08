@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.application.cache.answer_policy import is_cacheable_answer
-from app.domain import CacheFingerprint, SemanticCacheEntry, SemanticCacheMatch
+from app.domain import CacheFingerprint, ChatAnswer, SemanticCacheEntry, SemanticCacheMatch
 from app.infrastructure.postgres import PostgresSemanticCacheRepository
 
 
@@ -33,17 +33,17 @@ class SemanticCacheService:
         self,
         fingerprint: CacheFingerprint,
         question: str,
-        answer: str,
+        answer: ChatAnswer,
         embedding: list[float],
     ) -> None:
-        """Persist the answer unless it is empty or the 'not found' fallback."""
+        """Persist the answer JSON unless it has no items ('not found' answer)."""
         if not is_cacheable_answer(answer):
             return
         entry = SemanticCacheEntry(
             id=uuid4(),
             fingerprint=fingerprint,
             input_text=question,
-            response=answer,
+            response=answer.to_json(),
             embedding=embedding,
             # The column is a naive TIMESTAMP, so the value is stored as UTC.
             created_at=datetime.now(UTC).replace(tzinfo=None),

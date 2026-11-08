@@ -7,12 +7,13 @@ is exercised end to end across its public methods.
 
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from openai import AsyncOpenAI
 from pydantic import SecretStr
 
-from app.domain import MessageHistoryItem, MessageRole, PayloadQuestionOpenIA
+from app.domain import ChatAnswer, MessageHistoryItem, MessageRole, PayloadQuestionOpenIA
 from app.infrastructure.config import EmbeddingModelConfig, OpenAIConfig
 from app.infrastructure.openai import OpenAIService, create_openai_client
 
@@ -33,9 +34,17 @@ class _FakeResponses:
     def __init__(self, output_text: str) -> None:
         self._output_text = output_text
         self.calls: list[list[dict[str, str]]] = []
+        self.text_formats: list[dict[str, Any] | None] = []
 
-    async def create(self, *, model: str, input: list[dict[str, str]]) -> SimpleNamespace:
+    async def create(
+        self,
+        *,
+        model: str,
+        input: list[dict[str, str]],
+        text: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
         self.calls.append(input)
+        self.text_formats.append(text)
         return SimpleNamespace(output_text=self._output_text)
 
 
@@ -77,7 +86,8 @@ async def test_should_flag_insult_through_full_moderation_flow() -> None:
 @pytest.mark.asyncio
 async def test_should_run_embeddings_and_chat_flow_end_to_end() -> None:
     # Arrange
-    client = _FakeOpenAIClient(vector=[0.1, 0.2, 0.3], output_text="resposta final")
+    raw_answer = json.dumps({"respostas": ["Café Central", "Padaria São João"]})
+    client = _FakeOpenAIClient(vector=[0.1, 0.2, 0.3], output_text=raw_answer)
     service = OpenAIService(client=client, config=_config())
     payload = PayloadQuestionOpenIA(
         question="onde comer?",
@@ -94,7 +104,8 @@ async def test_should_run_embeddings_and_chat_flow_end_to_end() -> None:
     assert all(record.vector == [0.1, 0.2, 0.3] for record in records)
     assert question_vector == [0.1, 0.2, 0.3]
     assert client.embeddings.models == ["emb-model", "emb-model", "emb-model"]
-    assert answer == "resposta final"
+    assert answer == ChatAnswer(respostas=["Café Central", "Padaria São João"])
+    assert client.responses.text_formats == [{"format": {"type": "json_object"}}]
     # guide + one history message + question + phrases
     assert len(client.responses.calls[0]) == 4
 

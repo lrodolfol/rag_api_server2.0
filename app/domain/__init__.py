@@ -5,6 +5,7 @@ package must stay free of framework and infrastructure dependencies (FastAPI,
 boto3, HTTP/provider clients) so the domain remains independently testable.
 """
 
+from app.domain.answer import ChatAnswer
 from app.domain.cache import (
     CacheFingerprint,
     SemanticCacheEntry,
@@ -26,6 +27,7 @@ from app.domain.exceptions import (
     DomainError,
     HistoryStoreError,
     InappropriateContentError,
+    InvalidChatAnswerError,
     OpenIaException,
     RateLimitError,
     VectorRepositoryError,
@@ -35,6 +37,7 @@ from app.domain.search import OnlineChatSearchPayload, WhatsAppSearchPayload
 
 __all__ = [
     "CacheFingerprint",
+    "ChatAnswer",
     "ClientStorageError",
     "CompanyData",
     "CompanyDeletionRequest",
@@ -44,6 +47,7 @@ __all__ = [
     "HistoryStoreError",
     "InappropriateContentError",
     "INPUT_GUIDE",
+    "InvalidChatAnswerError",
     "MessageHistoryItem",
     "MessageRole",
     "OnlineChatSearchPayload",

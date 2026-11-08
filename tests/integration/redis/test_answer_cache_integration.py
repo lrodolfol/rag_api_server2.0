@@ -10,6 +10,7 @@ import asyncio
 import pytest
 from fakeredis import FakeAsyncRedis
 
+from app.domain import ChatAnswer
 from app.infrastructure.redis import (
     ANSWER_CACHE_KEY_PREFIX,
     ANSWER_CACHE_TTL_SECONDS,
@@ -54,3 +55,18 @@ async def test_should_miss_after_key_expires(client: FakeAsyncRedis) -> None:
 
     # Assert
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_should_round_trip_chat_answer_json(client: FakeAsyncRedis) -> None:
+    # Arrange
+    repository = RedisAnswerCacheRepository(client)
+    answer = ChatAnswer(respostas=["Padaria São João", "Açaí do Zé"])
+
+    # Act
+    await repository.set(CACHE_KEY, answer.to_json())
+    cached = await repository.get(CACHE_KEY)
+
+    # Assert
+    assert cached is not None
+    assert ChatAnswer.from_json(cached) == answer

@@ -15,6 +15,7 @@ from app.api.schemas import (
     OnlineChatSearchPayload,
     WhatsAppSearchPayload,
 )
+from app.domain import ChatAnswer
 
 
 @pytest.fixture
@@ -112,6 +113,22 @@ def test_should_accept_valid_online_chat_payload(client: TestClient) -> None:
     # Assert
     assert response.status_code == 200
     assert response.json()["message"] == "onde posso comer?"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"respostas": ["Padaria São João", "Açaí do Zé: aberto até às 22h"]}',
+        '{"respostas": []}',
+    ],
+)
+def test_should_round_trip_chat_answer_json_keeping_accents(raw: str) -> None:
+    # Act
+    serialized = ChatAnswer.from_json(raw).to_json()
+
+    # Assert
+    assert serialized == raw
+    assert ChatAnswer.from_json(serialized) == ChatAnswer.from_json(raw)
 
 
 def test_should_reject_online_chat_with_invalid_ip(client: TestClient) -> None:

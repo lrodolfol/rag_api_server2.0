@@ -32,3 +32,7 @@ class HistoryStoreError(DomainError):
 
 class ClientStorageError(DomainError):
     """Raised when persisting a client record to object storage fails."""
+
+
+class InvalidChatAnswerError(DomainError):
+    """Raised when an answer payload is not valid ``{"respostas": [...]}`` JSON."""

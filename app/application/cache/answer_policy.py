@@ -1,6 +1,8 @@
 """Answer caching policy shared by the exact (Redis) and semantic (PostgreSQL) caches."""
 
+from app.domain import ChatAnswer
 
-def is_cacheable_answer(answer: str) -> bool:
-    """Return ``False`` for empty or whitespace-only answers ('not found' responses)."""
-    return bool(answer.strip())
+
+def is_cacheable_answer(answer: ChatAnswer) -> bool:
+    """Return ``False`` for answers without items ('not found' responses)."""
+    return not answer.is_empty()

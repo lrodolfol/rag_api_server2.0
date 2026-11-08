@@ -14,12 +14,19 @@ logged.
 """
 
 import json
-from tokenize import String
-from typing import Final
+from typing import Any, Final
 
 from openai import AsyncOpenAI, OpenAIError
 
-from app.domain import EmbeddingRecord, INPUT_GUIDE, OpenIaException, PayloadQuestionOpenIA, QUERY_PREFIX
+from app.domain import (
+    INPUT_GUIDE,
+    QUERY_PREFIX,
+    ChatAnswer,
+    EmbeddingRecord,
+    InvalidChatAnswerError,
+    OpenIaException,
+    PayloadQuestionOpenIA,
+)
 from app.infrastructure.config import OpenAIConfig
 from app.infrastructure.logging.logger import get_logger
 from app.infrastructure.openai.models import ModerationResult
@@ -27,6 +34,10 @@ from app.infrastructure.openai.models import ModerationResult
 logger = get_logger(__name__)
 
 ChatMessage = dict[str, str]
+TextFormat = dict[str, Any]
+
+# JSON mode of the Responses API: the model must return a JSON object.
+_JSON_TEXT_FORMAT: Final[TextFormat] = {"format": {"type": "json_object"}}
 
 _MODERATION_PROMPT: Final[str] = (
     "Você é um assistente especialista em análise de informações enviadas por "
@@ -77,13 +88,16 @@ class OpenAIService:
 
     async def generate_chat_answer(
         self, payload: PayloadQuestionOpenIA, phrases: list[str]
-    ) -> str:
+    ) -> ChatAnswer:
         """Generate the chat answer from the guide, history, question and matches."""
         if payload.is_invalid():
-            return ""
+            return ChatAnswer()
         logger.info("Sending chat completion request to OpenAI (context_phrases=%d)", len(phrases))
-        answer = await self._create_response(self._build_chat_input(payload, phrases))
-        logger.info("Chat completion response received from OpenAI")
+        raw_answer = await self._create_response(
+            self._build_chat_input(payload, phrases), text_format=_JSON_TEXT_FORMAT
+        )
+        answer = self._parse_chat_answer(raw_answer)
+        logger.info("Chat completion response received from OpenAI (items=%d)", len(answer.respostas))
         return answer
 
     async def _generate_vector(self, text: str) -> list[float]:
@@ -96,15 +110,28 @@ class OpenAIService:
             raise OpenIaException("Failed to generate embedding") from error
         return response.data[0].embedding
 
-    async def _create_response(self, chat_input: list[ChatMessage]) -> str:
+    async def _create_response(
+        self, chat_input: list[ChatMessage], text_format: TextFormat | None = None
+    ) -> str:
+        options = {"text": text_format} if text_format is not None else {}
         try:
             response = await self._client.responses.create(
-                model=self._config.model_chat, input=chat_input
+                model=self._config.model_chat, input=chat_input, **options
             )
         except OpenAIError as error:
             logger.exception("OpenAI chat request failed")
             raise OpenIaException("Failed to generate response") from error
         return response.output_text if response else ""
+
+    def _parse_chat_answer(self, raw_answer: str) -> ChatAnswer:
+        if not raw_answer.strip():
+            logger.warning("OpenAI returned an empty chat answer")
+            return ChatAnswer()
+        try:
+            return ChatAnswer.from_json(self._strip_code_fence(raw_answer))
+        except InvalidChatAnswerError:
+            logger.error("Chat answer was not valid answer JSON, treating it as not found")
+            return ChatAnswer()
 
     def _build_chat_input(
         self, payload: PayloadQuestionOpenIA, phrases: list[str]
@@ -116,7 +143,7 @@ class OpenAIService:
             {"role": "system", "content": INPUT_GUIDE},
             *self._build_history(payload),
             {"role": "user", "content": f"Pergunta: {payload.question}"},
-            {"role": "system", "content": f"Trechos: {knowledge}"},
+            {"role": "system", "content": f"Trechos: \n\n------\n\n {knowledge}"},
         ]
 
     def _build_history(self, payload: PayloadQuestionOpenIA) -> list[ChatMessage]:

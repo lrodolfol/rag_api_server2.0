@@ -9,6 +9,7 @@ import pytest
 from app.application.cache import SemanticCacheService, is_cacheable_answer
 from app.domain import (
     CacheFingerprint,
+    ChatAnswer,
     SemanticCacheEntry,
     SemanticCacheMatch,
 )
@@ -21,7 +22,7 @@ FINGERPRINT = CacheFingerprint(
 )
 EMBEDDING = [0.1, 0.2, 0.3]
 QUESTION = "Onde vende marmitas?"
-ANSWER = "Marmitaria Central"
+ANSWER = ChatAnswer(respostas=["Marmitaria Central", "Café São João"])
 
 
 def _match(response: str, distance: float) -> SemanticCacheMatch:
@@ -90,7 +91,7 @@ async def test_should_store_entry_with_generated_id_and_creation_time() -> None:
     assert entry.id.version == 4
     assert entry.fingerprint == FINGERPRINT
     assert entry.input_text == QUESTION
-    assert entry.response == ANSWER
+    assert entry.response == '{"respostas": ["Marmitaria Central", "Café São João"]}'
     assert entry.embedding == EMBEDDING
     assert before <= entry.created_at <= before + timedelta(seconds=5)
 
@@ -110,22 +111,22 @@ async def test_should_generate_a_new_id_for_each_entry() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer", ["", "   "])
-async def test_should_not_store_empty_or_fallback_answer(answer: str) -> None:
+@pytest.mark.parametrize("items", [[], ["", "   "]])
+async def test_should_not_store_answer_without_items(items: list[str]) -> None:
     # Arrange
     service, repository = _service()
 
     # Act
-    await service.store(FINGERPRINT, QUESTION, answer, EMBEDDING)
+    await service.store(FINGERPRINT, QUESTION, ChatAnswer(respostas=items), EMBEDDING)
 
     # Assert
     repository.save.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
-    ("answer", "expected"),
-    [("Padaria Central", True), ("", False), ("  \n", False)],
+    ("items", "expected"),
+    [(["Padaria Central"], True), ([], False), (["  \n"], False)],
 )
-def test_should_classify_cacheable_answers(answer: str, expected: bool) -> None:
+def test_should_classify_cacheable_answers(items: list[str], expected: bool) -> None:
     # Act / Assert
-    assert is_cacheable_answer(answer) is expected
+    assert is_cacheable_answer(ChatAnswer(respostas=items)) is expected
