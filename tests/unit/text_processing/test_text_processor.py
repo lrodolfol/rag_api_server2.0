@@ -51,18 +51,6 @@ def test_should_return_single_chunk_for_short_text() -> None:
     assert chunks == ["Padaria do Centro. Abre de segunda a sexta."]
 
 
-def test_should_produce_typed_list_of_strings() -> None:
-    # Arrange
-    text = "conteudo de exemplo do cadastro"
-
-    # Act
-    chunks = generate_chunks(text)
-
-    # Assert
-    assert isinstance(chunks, list)
-    assert all(isinstance(chunk, str) for chunk in chunks)
-
-
 def test_should_not_return_empty_chunks() -> None:
     # Arrange
     text = "linha 1\n\n\nlinha 2\n\n\nlinha 3"

@@ -8,6 +8,7 @@ from app.infrastructure.config.loader import ConfigError, get_config
 from app.infrastructure.config.models import (
     AppConfig,
     BucketConfig,
+    CategoriesConfig,
     CeoConfig,
     CompanyConfig,
     EmbeddingModelConfig,
@@ -22,6 +23,7 @@ from app.infrastructure.config.models import (
 __all__ = [
     "AppConfig",
     "BucketConfig",
+    "CategoriesConfig",
     "CeoConfig",
     "CompanyConfig",
     "ConfigError",

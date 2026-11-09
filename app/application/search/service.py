@@ -17,8 +17,12 @@ WhatsApp and online-chat endpoints, so the flow is defined once:
   similar first, without duplicated items); a hit returns the merged answer and
   also stores its JSON in the exact cache under the current key;
 * load the user's prior history for the channel;
+* classify the question alone (no history) into one of the catalog categories
+  with the language model; the search runs without a category filter when the
+  catalog is empty, the model returns no known category, or the call fails
+  (logged as a warning);
 * query the vector store with that embedding (only matches above the
-  similarity threshold);
+  similarity threshold), restricted to the category when one was found;
 * ask the language model for a :class:`ChatAnswer` from the guide, history and
   matches;
 * store the answer JSON in the exact and semantic caches when it is cacheable;
@@ -44,6 +48,7 @@ from app.application.cache import (
     build_fingerprint,
     is_cacheable_answer,
 )
+from app.application.categories import CategoryService
 from app.application.text_processing import is_short_message
 from app.domain import (
     CacheFingerprint,
@@ -51,6 +56,7 @@ from app.domain import (
     InvalidChatAnswerError,
     MessageHistoryItem,
     MessageRole,
+    OpenIaException,
     PayloadQuestionOpenIA,
     SemanticCacheMatch,
 )
@@ -128,6 +134,7 @@ class SearchService:
         answer_cache: RedisAnswerCacheRepository,
         semantic_cache: SemanticCacheService,
         fingerprint_config: FingerPrintConfig,
+        category_service: CategoryService,
     ) -> None:
         self._openai = openai_service
         self._vectors = vector_repository
@@ -135,6 +142,7 @@ class SearchService:
         self._answer_cache = answer_cache
         self._semantic_cache = semantic_cache
         self._fingerprint_config = fingerprint_config
+        self._categories = category_service
 
     async def search(
         self, channel: HistoryChannel, user_key: str, question: str
@@ -260,7 +268,8 @@ class SearchService:
         """Generate the answer from history, vector matches and the language model."""
         history = await self._history.get_history(channel, user_key)
         logger.info("History loaded: %d messages for channel='%s'", len(history), channel.value)
-        matches = await self._find_matches(embedding)
+        category_slug = await self._classify_question(question)
+        matches = await self._find_matches(embedding, category_slug)
         logger.info("Vector search completed: %d relevant matches found", len(matches))
         payload = PayloadQuestionOpenIA(question=question, chat_historic=history)
         logger.info("Requesting chat answer from OpenAI")
@@ -284,9 +293,29 @@ class SearchService:
         await self._answer_cache.set(cache_key, answer.to_json())
         await self._semantic_cache.store(fingerprint, question, answer, embedding)
 
-    async def _find_matches(self, embedding: list[float]) -> list[VectorMatch]:
-        """Return the vector-store matches above the threshold for ``embedding``."""
-        return await self._vectors.query(embedding)
+    async def _classify_question(self, question: str) -> str | None:
+        """Return the catalog category slug of ``question``, or ``None`` (no filter)."""
+        categories = await self._categories.list_names()
+        if not categories:
+            logger.info("No categories in the catalog, searching without category filter")
+            return None
+        try:
+            category_name = await self._openai.classify_question(question, categories)
+        except OpenIaException:
+            logger.warning("Question classification failed, searching without category filter")
+            return None
+        category = await self._categories.find(category_name)
+        if category is None:
+            logger.info("No catalog category for the question, searching without category filter")
+            return None
+        logger.info("Searching in category '%s'", category.slug)
+        return category.slug
+
+    async def _find_matches(
+        self, embedding: list[float], category_slug: str | None
+    ) -> list[VectorMatch]:
+        """Return the vector-store matches above the threshold, optionally by category."""
+        return await self._vectors.query(embedding, category_slug=category_slug)
 
     async def _persist_turn(
         self, channel: HistoryChannel, user_key: str, question: str, answer: ChatAnswer

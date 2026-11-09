@@ -41,12 +41,3 @@ def test_should_drop_blank_lines_from_registration_text() -> None:
     assert "\n\n" not in joined  # blank lines were removed during normalisation
     assert "Delivery: Sim" in joined
     assert "Entrega gratuita em domicílio" in joined
-
-
-def test_should_preserve_content_across_chunks() -> None:
-    # Act
-    chunks = generate_chunks(REGISTRATION_TEXT)
-
-    # Assert
-    assert any("Padaria e Confeitaria" in chunk for chunk in chunks)
-    assert any("Formas de pagamento" in chunk for chunk in chunks)

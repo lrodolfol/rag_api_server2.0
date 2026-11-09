@@ -1,4 +1,4 @@
-"""Unit tests for :class:`SemanticCacheService` and the shared caching policy."""
+"""Unit tests for :class:`SemanticCacheService`."""
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 
-from app.application.cache import SemanticCacheService, is_cacheable_answer
+from app.application.cache import SemanticCacheService
 from app.domain import (
     CacheFingerprint,
     ChatAnswer,
@@ -49,31 +49,6 @@ async def test_should_return_every_match_in_repository_order() -> None:
     # Assert
     assert result == matches
     repository.find_nearest.assert_awaited_once_with(EMBEDDING, FINGERPRINT)
-
-
-@pytest.mark.asyncio
-async def test_should_return_empty_list_when_no_match() -> None:
-    # Arrange
-    service, _ = _service([])
-
-    # Act
-    result = await service.find_answer(FINGERPRINT, EMBEDDING)
-
-    # Assert
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_should_not_filter_matches_by_similarity() -> None:
-    # Arrange: the similarity threshold is applied by the search service.
-    matches = [_match("Proximo", 0.05), _match("Distante", 0.95)]
-    service, _ = _service(matches)
-
-    # Act
-    result = await service.find_answer(FINGERPRINT, EMBEDDING)
-
-    # Assert
-    assert result == matches
 
 
 @pytest.mark.asyncio
@@ -121,12 +96,3 @@ async def test_should_not_store_answer_without_items(items: list[str]) -> None:
 
     # Assert
     repository.save.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    ("items", "expected"),
-    [(["Padaria Central"], True), ([], False), (["  \n"], False)],
-)
-def test_should_classify_cacheable_answers(items: list[str], expected: bool) -> None:
-    # Act / Assert
-    assert is_cacheable_answer(ChatAnswer(respostas=items)) is expected

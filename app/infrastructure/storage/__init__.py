@@ -7,12 +7,12 @@ configuration, and the JSONL object key the records are stored under.
 
 from app.infrastructure.storage.client import create_s3_client
 from app.infrastructure.storage.repository import (
-    CLIENT_RECORDS_OBJECT_KEY,
+    CLIENT_RECORDS_OBJECT_KEY_TEMPLATE,
     ClientStorageRepository,
 )
 
 __all__ = [
-    "CLIENT_RECORDS_OBJECT_KEY",
+    "CLIENT_RECORDS_OBJECT_KEY_TEMPLATE",
     "ClientStorageRepository",
     "create_s3_client",
 ]

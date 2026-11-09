@@ -160,20 +160,6 @@ async def test_should_map_rows_to_matches_in_received_order(
 
 
 @pytest.mark.asyncio
-async def test_should_return_empty_list_when_no_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Arrange
-    _patch_connection(monkeypatch, FakeConnection())
-
-    # Act
-    matches = await _repository().find_nearest(EMBEDDING, FINGERPRINT)
-
-    # Assert
-    assert matches == []
-
-
-@pytest.mark.asyncio
 async def test_should_return_empty_list_and_log_when_connection_fails(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

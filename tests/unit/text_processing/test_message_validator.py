@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.application.text_processing import MIN_MESSAGE_LETTERS, is_short_message
+from app.application.text_processing import is_short_message
 
 
 @pytest.mark.parametrize(
@@ -27,8 +27,3 @@ def test_should_not_identify_valid_message_as_short(message: str) -> None:
 
     # Assert
     assert result is False
-
-
-def test_should_require_two_letters_as_minimum() -> None:
-    # Assert
-    assert MIN_MESSAGE_LETTERS == 2

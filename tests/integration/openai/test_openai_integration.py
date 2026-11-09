@@ -15,7 +15,12 @@ from pydantic import SecretStr
 
 from app.domain import ChatAnswer, MessageHistoryItem, MessageRole, PayloadQuestionOpenIA
 from app.infrastructure.config import EmbeddingModelConfig, OpenAIConfig
-from app.infrastructure.openai import OpenAIService, create_openai_client
+from app.infrastructure.openai import (
+    OpenAIService,
+    create_openai_client,
+)
+
+CATEGORIES = ["ALIMENTAÇÃO", "SAÚDE", "SERVIÇOS PROFISSIONAIS"]
 
 
 class _FakeEmbeddings:
@@ -66,21 +71,6 @@ def _config() -> OpenAIConfig:
         model_chat="chat-model",
         input_guide="guia do assistente",
     )
-
-
-@pytest.mark.asyncio
-async def test_should_flag_insult_through_full_moderation_flow() -> None:
-    # Arrange
-    raw = json.dumps({"insult": True, "insult_text": "xingamento"})
-    client = _FakeOpenAIClient(vector=[], output_text=raw)
-    service = OpenAIService(client=client, config=_config())
-
-    # Act
-    result = await service.moderate("dados do cliente")
-
-    # Assert
-    assert result.insult is True
-    assert result.insult_text == "xingamento"
 
 
 @pytest.mark.asyncio

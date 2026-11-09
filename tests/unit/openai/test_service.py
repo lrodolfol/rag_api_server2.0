@@ -20,6 +20,8 @@ from app.domain import (
 from app.infrastructure.config import EmbeddingModelConfig, OpenAIConfig
 from app.infrastructure.openai import ModerationResult, OpenAIService
 
+CATEGORIES = ["ALIMENTAÇÃO", "CASA E MANUTENÇÃO", "SERVIÇOS PROFISSIONAIS"]
+
 
 def _config(default_model: str = "economic") -> OpenAIConfig:
     return OpenAIConfig(
@@ -60,37 +62,12 @@ async def test_should_flag_inappropriate_content() -> None:
     client = _client_with_response('{"insult": true, "insult_text": "palavrao"}')
 
     # Act
-    result = await _service_with(client).moderate("dados ofensivos")
+    result = await _service_with(client).moderate("dados ofensivos", CATEGORIES)
 
     # Assert
     assert isinstance(result, ModerationResult)
     assert result.insult is True
     assert result.insult_text == "palavrao"
-
-
-@pytest.mark.asyncio
-async def test_should_not_flag_clean_content() -> None:
-    # Arrange
-    client = _client_with_response('{"insult": false, "insult_text": ""}')
-
-    # Act
-    result = await _service_with(client).moderate("empresa de bolos")
-
-    # Assert
-    assert result.insult is False
-    assert result.insult_text == ""
-
-
-@pytest.mark.asyncio
-async def test_should_parse_moderation_wrapped_in_code_fence() -> None:
-    # Arrange
-    client = _client_with_response('```json\n{"insult": false, "insult_text": ""}\n```')
-
-    # Act
-    result = await _service_with(client).moderate("empresa")
-
-    # Assert
-    assert result.insult is False
 
 
 @pytest.mark.asyncio
@@ -100,7 +77,132 @@ async def test_should_raise_when_moderation_response_is_not_json() -> None:
 
     # Act / Assert
     with pytest.raises(OpenIaException):
-        await _service_with(client).moderate("empresa")
+        await _service_with(client).moderate("empresa", CATEGORIES)
+
+
+def _sent_prompt(client: MagicMock) -> str:
+    return client.responses.create.await_args.kwargs["input"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_should_send_every_category_one_per_line_in_the_prompt() -> None:
+    # Arrange
+    client = _client_with_response('{"insult": false, "insult_text": "", "categoria": "ALIMENTAÇÃO"}')
+
+    # Act
+    await _service_with(client).moderate("empresa de bolos", CATEGORIES)
+
+    # Assert
+    prompt = _sent_prompt(client)
+    assert "\n".join(CATEGORIES) in prompt
+    assert "empresa de bolos" in prompt
+    assert "exatamente uma categoria da lista" in prompt
+    assert '"categoria"' in prompt
+
+
+@pytest.mark.asyncio
+async def test_should_only_ask_for_a_suggestion_when_category_list_is_empty() -> None:
+    # Arrange
+    client = _client_with_response('{"insult": false, "insult_text": "", "categoria": "PETSHOP"}')
+
+    # Act
+    result = await _service_with(client).moderate("banho e tosa", [])
+
+    # Assert
+    prompt = _sent_prompt(client)
+    assert "Categorias disponíveis" not in prompt
+    assert "Sugira para o serviço uma única categoria nova" in prompt
+    assert '"categoria"' in prompt
+    assert result.category == "PETSHOP"
+
+
+@pytest.mark.asyncio
+async def test_should_keep_braces_in_categories_and_content() -> None:
+    # Arrange
+    client = _client_with_response('{"insult": false, "insult_text": ""}')
+
+    # Act
+    await _service_with(client).moderate("preço {promo}", ["CATEGORIA {X}"])
+
+    # Assert
+    prompt = _sent_prompt(client)
+    assert "preço {promo}" in prompt
+    assert "CATEGORIA {X}" in prompt
+
+
+@pytest.mark.asyncio
+async def test_should_parse_category_from_moderation() -> None:
+    # Arrange
+    client = _client_with_response('{"insult": false, "insult_text": "", "categoria": "ALIMENTAÇÃO"}')
+
+    # Act
+    result = await _service_with(client).moderate("empresa de bolos", CATEGORIES)
+
+    # Assert
+    assert result == ModerationResult(insult=False, insult_text="", category="ALIMENTAÇÃO")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"insult": false, "insult_text": ""}',
+        '{"insult": false, "insult_text": "", "categoria": null}',
+        '{"insult": false, "insult_text": "", "categoria": "   "}',
+    ],
+)
+async def test_should_return_empty_category_when_missing(raw: str) -> None:
+    # Arrange
+    client = _client_with_response(raw)
+
+    # Act
+    result = await _service_with(client).moderate("empresa", CATEGORIES)
+
+    # Assert
+    assert result.category == ""
+
+
+@pytest.mark.asyncio
+async def test_should_strip_spaces_around_category() -> None:
+    # Arrange
+    client = _client_with_response('{"insult": false, "insult_text": "", "categoria": "  PETSHOP  "}')
+
+    # Act
+    result = await _service_with(client).moderate("empresa", CATEGORIES)
+
+    # Assert
+    assert result.category == "PETSHOP"
+
+
+@pytest.mark.asyncio
+async def test_should_parse_category_wrapped_in_code_fence() -> None:
+    # Arrange
+    client = _client_with_response(
+        '```json\n{"insult": false, "insult_text": "", "categoria": "MODA"}\n```'
+    )
+
+    # Act
+    result = await _service_with(client).moderate("loja de roupas", CATEGORIES)
+
+    # Assert
+    assert result.category == "MODA"
+
+
+@pytest.mark.asyncio
+async def test_should_log_only_the_category_name(caplog: pytest.LogCaptureFixture) -> None:
+    # Arrange
+    client = _client_with_response(
+        '{"insult": true, "insult_text": "palavrao", "categoria": "MODA"}'
+    )
+
+    # Act
+    with caplog.at_level(logging.INFO):
+        await _service_with(client).moderate("conteudo sigiloso do cliente", CATEGORIES)
+
+    # Assert
+    assert "category='MODA'" in caplog.text
+    assert "conteudo sigiloso do cliente" not in caplog.text
+    assert "palavrao" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -194,7 +296,7 @@ async def test_should_not_request_json_format_on_moderation() -> None:
     client = _client_with_response('{"insult": false, "insult_text": ""}')
 
     # Act
-    await _service_with(client).moderate("empresa")
+    await _service_with(client).moderate("empresa", CATEGORIES)
 
     # Assert
     assert "text" not in client.responses.create.await_args.kwargs
@@ -348,3 +450,95 @@ async def test_should_send_default_embedding_model_to_provider(
 
     # Assert
     assert client.embeddings.create.await_args.kwargs["model"] == expected_model
+
+
+# --- Question classification -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_should_send_categories_and_question_separately_for_classification() -> None:
+    # Arrange
+    client = _client_with_response('{"categoria": "ALIMENTAÇÃO"}')
+
+    # Act
+    await _service_with(client).classify_question("onde tem pizzaria?", CATEGORIES)
+
+    # Assert
+    kwargs = client.responses.create.await_args.kwargs
+    system_prompt = kwargs["input"][0]["content"]
+    assert kwargs["input"][0]["role"] == "system"
+    assert "\n".join(CATEGORIES) in system_prompt
+    assert "exatamente uma categoria da lista" in system_prompt
+    assert '"categoria"' in system_prompt
+    assert "onde tem pizzaria?" not in system_prompt
+    assert kwargs["input"][1] == {"role": "user", "content": "onde tem pizzaria?"}
+    assert kwargs["text"] == {"format": {"type": "json_object"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ('{"categoria": "ALIMENTAÇÃO"}', "ALIMENTAÇÃO"),
+        ('{"categoria": "  BELEZA  "}', "BELEZA"),
+        ('```json\n{"categoria": "MODA"}\n```', "MODA"),
+        ('{"categoria": ""}', ""),
+        ('{"categoria": null}', ""),
+        ("{}", ""),
+    ],
+)
+async def test_should_parse_classified_category(raw: str, expected: str) -> None:
+    # Arrange
+    client = _client_with_response(raw)
+
+    # Act
+    category = await _service_with(client).classify_question("pergunta", CATEGORIES)
+
+    # Assert
+    assert category == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", ["isto nao e json", '["ALIMENTAÇÃO"]', ""])
+async def test_should_raise_when_classification_is_not_a_json_object(raw: str) -> None:
+    # Arrange
+    client = _client_with_response(raw)
+
+    # Act / Assert
+    with pytest.raises(OpenIaException):
+        await _service_with(client).classify_question("pergunta", CATEGORIES)
+
+
+@pytest.mark.asyncio
+async def test_should_wrap_provider_error_on_classification() -> None:
+    # Arrange
+    client = MagicMock()
+    client.responses.create = AsyncMock(side_effect=OpenAIError("down"))
+
+    # Act / Assert
+    with pytest.raises(OpenIaException):
+        await _service_with(client).classify_question("pergunta", CATEGORIES)
+
+
+@pytest.mark.asyncio
+async def test_should_not_log_the_classified_question(caplog: pytest.LogCaptureFixture) -> None:
+    # Arrange
+    client = _client_with_response('{"categoria": "ALIMENTAÇÃO"}')
+
+    # Act
+    with caplog.at_level(logging.INFO):
+        await _service_with(client).classify_question("pergunta secreta", CATEGORIES)
+
+    # Assert
+    assert "category='ALIMENTAÇÃO'" in caplog.text
+    assert "pergunta secreta" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_raise_when_moderation_is_not_a_json_object() -> None:
+    # Arrange
+    client = _client_with_response('["nao", "objeto"]')
+
+    # Act / Assert
+    with pytest.raises(OpenIaException):
+        await _service_with(client).moderate("empresa", CATEGORIES)

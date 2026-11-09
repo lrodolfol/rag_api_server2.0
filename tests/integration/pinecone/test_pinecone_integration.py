@@ -2,8 +2,8 @@
 
 No real Pinecone calls are made: a hand-written fake client keeps an in-memory
 index and computes cosine similarity so the full repository flow (index
-creation, delete-before-upsert replacement, query and threshold filtering) is
-exercised end to end.
+creation, delete-before-upsert replacement, category filter and lookup, query
+and threshold filtering) is exercised end to end.
 """
 
 import math
@@ -28,6 +28,15 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return numerator / (left_norm * right_norm)
+
+
+def _matches_filter(metadata: dict, metadata_filter: dict | None) -> bool:
+    """Apply the subset of Pinecone filters used by the repository."""
+    for key, condition in (metadata_filter or {}).items():
+        expected = condition["$eq"] if isinstance(condition, dict) else condition
+        if metadata.get(key) != expected:
+            return False
+    return True
 
 
 class _FakeIndex:
@@ -63,8 +72,7 @@ class _FakeIndex:
                 metadata=payload["metadata"] if include_metadata else None,
             )
             for vector_id, payload in self.store.items()
-            if not filter
-            or payload["metadata"].get("user_code") == filter.get("user_code")
+            if _matches_filter(payload["metadata"], filter)
         ]
         scored.sort(key=lambda match: match.score, reverse=True)
         return SimpleNamespace(matches=scored[:top_k])
@@ -120,7 +128,9 @@ async def test_should_store_and_return_only_similar_matches() -> None:
         EmbeddingRecord(text="padaria", vector=[1.0, 0.0]),
         EmbeddingRecord(text="floricultura", vector=[0.0, 1.0]),
     ]
-    await repository.upsert_company_vectors("Padaria Central", "123", embeddings)
+    await repository.upsert_company_vectors(
+        "Padaria Central", "123", "alimentacao", embeddings
+    )
 
     # Act
     results = await repository.query([1.0, 0.02], top_k=5)
@@ -137,12 +147,14 @@ async def test_should_replace_previous_vectors_on_update() -> None:
     client = _FakeClient()
     repository = PineconeVectorRepository(client=client, config=_config())
     await repository.upsert_company_vectors(
-        "Padaria Central", "123", [EmbeddingRecord(text="antigo", vector=[1.0, 0.0])]
+        "Padaria Central", "123", "alimentacao",
+        [EmbeddingRecord(text="antigo", vector=[1.0, 0.0])]
     )
 
     # Act
     await repository.upsert_company_vectors(
-        "Padaria Central", "123", [EmbeddingRecord(text="novo", vector=[1.0, 0.0])]
+        "Padaria Central", "123", "alimentacao",
+        [EmbeddingRecord(text="novo", vector=[1.0, 0.0])]
     )
     results = await repository.query([1.0, 0.0], top_k=5)
 
@@ -151,32 +163,17 @@ async def test_should_replace_previous_vectors_on_update() -> None:
 
 
 @pytest.mark.asyncio
-async def test_should_remove_vectors_with_delete_by_user_code() -> None:
-    # Arrange
-    client = _FakeClient()
-    repository = PineconeVectorRepository(client=client, config=_config())
-    await repository.upsert_company_vectors(
-        "Padaria", "123", [EmbeddingRecord(text="padaria", vector=[1.0, 0.0])]
-    )
-
-    # Act
-    await repository.delete_by_user_code("123")
-    results = await repository.query([1.0, 0.0], top_k=5)
-
-    # Assert
-    assert results == []
-
-
-@pytest.mark.asyncio
 async def test_should_check_existence_then_delete_only_target_user_code() -> None:
     # Arrange
     client = _FakeClient()
     repository = PineconeVectorRepository(client=client, config=_config())
     await repository.upsert_company_vectors(
-        "Padaria", "123", [EmbeddingRecord(text="padaria", vector=[1.0, 0.0])]
+        "Padaria", "123", "alimentacao",
+        [EmbeddingRecord(text="padaria", vector=[1.0, 0.0])]
     )
     await repository.upsert_company_vectors(
-        "Floricultura", "456", [EmbeddingRecord(text="flores", vector=[0.0, 1.0])]
+        "Floricultura", "456", "alimentacao",
+        [EmbeddingRecord(text="flores", vector=[0.0, 1.0])]
     )
 
     # Act
@@ -190,17 +187,72 @@ async def test_should_check_existence_then_delete_only_target_user_code() -> Non
     assert await repository.has_vectors_for_user_code("456") is True
 
 
+async def _two_categories_repository() -> PineconeVectorRepository:
+    repository = PineconeVectorRepository(client=_FakeClient(), config=_config())
+    await repository.upsert_company_vectors(
+        "Padaria", "123", "alimentacao", [EmbeddingRecord(text="padaria", vector=[1.0, 0.0])]
+    )
+    await repository.upsert_company_vectors(
+        "Clinica", "456", "saude", [EmbeddingRecord(text="clinica", vector=[1.0, 0.1])]
+    )
+    return repository
+
+
 @pytest.mark.asyncio
-async def test_should_report_no_vectors_for_unknown_user_code() -> None:
+async def test_should_return_only_vectors_of_the_filtered_category() -> None:
+    # Arrange
+    repository = await _two_categories_repository()
+
+    # Act
+    food = await repository.query([1.0, 0.0], top_k=5, category_slug="alimentacao")
+    health = await repository.query([1.0, 0.0], top_k=5, category_slug="saude")
+    other = await repository.query([1.0, 0.0], top_k=5, category_slug="moda")
+    unfiltered = await repository.query([1.0, 0.0], top_k=5)
+
+    # Assert
+    assert [(match.text, match.category) for match in food] == [("padaria", "alimentacao")]
+    assert [(match.text, match.category) for match in health] == [("clinica", "saude")]
+    assert other == []
+    assert {match.text for match in unfiltered} == {"padaria", "clinica"}
+
+
+@pytest.mark.asyncio
+async def test_should_read_category_by_user_code() -> None:
+    # Arrange
+    repository = await _two_categories_repository()
+
+    # Act / Assert
+    assert await repository.get_category_by_user_code("123") == "alimentacao"
+    assert await repository.get_category_by_user_code("456") == "saude"
+    assert await repository.get_category_by_user_code("unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_should_read_new_category_after_client_changes_category() -> None:
+    # Arrange
+    repository = await _two_categories_repository()
+
+    # Act
+    await repository.upsert_company_vectors(
+        "Padaria", "123", "comercio", [EmbeddingRecord(text="mercearia", vector=[1.0, 0.0])]
+    )
+
+    # Assert
+    assert await repository.get_category_by_user_code("123") == "comercio"
+    assert await repository.query([1.0, 0.0], top_k=5, category_slug="alimentacao") == []
+
+
+@pytest.mark.asyncio
+async def test_should_return_no_category_for_legacy_vectors() -> None:
     # Arrange
     client = _FakeClient()
     repository = PineconeVectorRepository(client=client, config=_config())
+    await repository.create_index_if_not_exists()
+    client.Index("any").upsert(vectors=[("old-1", [1.0, 0.0], {"text": "a", "user_code": "789"})])
 
-    # Act
-    found = await repository.has_vectors_for_user_code("unknown")
-
-    # Assert
-    assert found is False
+    # Act / Assert
+    assert await repository.has_vectors_for_user_code("789") is True
+    assert await repository.get_category_by_user_code("789") is None
 
 
 @pytest.mark.asyncio

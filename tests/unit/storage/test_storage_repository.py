@@ -11,7 +11,6 @@ from pydantic import SecretStr
 from app.domain import ClientStorageError, CompanyRegistrationRequest
 from app.infrastructure.config import BucketConfig
 from app.infrastructure.storage import (
-    CLIENT_RECORDS_OBJECT_KEY,
     ClientStorageRepository,
 )
 
@@ -66,31 +65,17 @@ async def test_should_write_single_record_when_object_missing() -> None:
     repository = ClientStorageRepository(client=client, config=_config())
 
     # Act
-    await repository.save_client(_registration("123", "Padaria"))
+    await repository.save_client(_registration("123", "Padaria"), "alimentacao")
 
     # Assert
     kwargs = client.put_object.call_args.kwargs
     assert kwargs["Bucket"] == "acha-local"
-    assert kwargs["Key"] == CLIENT_RECORDS_OBJECT_KEY
+    assert kwargs["Key"] == "client_services_alimentacao.jsonl"
+    assert client.get_object.call_args.kwargs["Key"] == "client_services_alimentacao.jsonl"
     records = _written_records(client)
     assert len(records) == 1
     assert records[0]["user_code"] == "123"
     assert records[0]["request"]["name"] == "Padaria"
-
-
-@pytest.mark.asyncio
-async def test_should_append_record_for_new_user_code() -> None:
-    # Arrange
-    existing = json.dumps(_registration("111", "Floricultura").model_dump(mode="json"))
-    client = _client_with_body((existing + "\n").encode("utf-8"))
-    repository = ClientStorageRepository(client=client, config=_config())
-
-    # Act
-    await repository.save_client(_registration("222", "Padaria"))
-
-    # Assert
-    records = _written_records(client)
-    assert [record["user_code"] for record in records] == ["111", "222"]
 
 
 @pytest.mark.asyncio
@@ -102,7 +87,7 @@ async def test_should_replace_record_for_existing_user_code() -> None:
     repository = ClientStorageRepository(client=client, config=_config())
 
     # Act
-    await repository.save_client(_registration("123", "Nome Novo"))
+    await repository.save_client(_registration("123", "Nome Novo"), "alimentacao")
 
     # Assert
     records = _written_records(client)
@@ -119,7 +104,7 @@ async def test_should_serialize_each_record_on_its_own_line() -> None:
     repository = ClientStorageRepository(client=client, config=_config())
 
     # Act
-    await repository.save_client(_registration("222", "Padaria"))
+    await repository.save_client(_registration("222", "Padaria"), "alimentacao")
 
     # Assert
     body = client.put_object.call_args.kwargs["Body"].decode("utf-8")
@@ -135,7 +120,7 @@ async def test_should_raise_when_bucket_name_missing() -> None:
 
     # Act / Assert
     with pytest.raises(ClientStorageError):
-        await repository.save_client(_registration())
+        await repository.save_client(_registration(), "alimentacao")
     client.get_object.assert_not_called()
 
 
@@ -148,7 +133,7 @@ async def test_should_wrap_provider_error_on_read() -> None:
 
     # Act / Assert
     with pytest.raises(ClientStorageError):
-        await repository.save_client(_registration())
+        await repository.save_client(_registration(), "alimentacao")
     client.put_object.assert_not_called()
 
 
@@ -163,7 +148,7 @@ async def test_should_wrap_provider_error_on_write() -> None:
 
     # Act / Assert
     with pytest.raises(ClientStorageError):
-        await repository.save_client(_registration())
+        await repository.save_client(_registration(), "alimentacao")
 
 
 def _jsonl(*registrations: CompanyRegistrationRequest) -> bytes:
@@ -179,7 +164,7 @@ async def test_should_delete_only_target_user_code_record() -> None:
     repository = ClientStorageRepository(client=client, config=_config())
 
     # Act
-    await repository.delete_client("111")
+    await repository.delete_client("111", "alimentacao")
 
     # Assert
     records = _written_records(client)
@@ -193,7 +178,7 @@ async def test_should_not_rewrite_when_user_code_not_found_on_delete() -> None:
     repository = ClientStorageRepository(client=client, config=_config())
 
     # Act
-    await repository.delete_client("999")
+    await repository.delete_client("999", "alimentacao")
 
     # Assert
     client.put_object.assert_not_called()
@@ -206,23 +191,10 @@ async def test_should_not_rewrite_when_object_missing_on_delete() -> None:
     repository = ClientStorageRepository(client=client, config=_config())
 
     # Act
-    await repository.delete_client("111")
+    await repository.delete_client("111", "alimentacao")
 
     # Assert
     client.put_object.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_should_write_empty_body_when_last_record_deleted() -> None:
-    # Arrange
-    client = _client_with_body(_jsonl(_registration("111", "Floricultura")))
-    repository = ClientStorageRepository(client=client, config=_config())
-
-    # Act
-    await repository.delete_client("111")
-
-    # Assert
-    assert client.put_object.call_args.kwargs["Body"] == b""
 
 
 @pytest.mark.asyncio
@@ -234,7 +206,7 @@ async def test_should_wrap_provider_error_on_delete() -> None:
 
     # Act / Assert
     with pytest.raises(ClientStorageError):
-        await repository.delete_client("111")
+        await repository.delete_client("111", "alimentacao")
     client.put_object.assert_not_called()
 
 
@@ -246,21 +218,81 @@ async def test_should_not_log_user_code_on_delete(caplog: pytest.LogCaptureFixtu
 
     # Act
     with caplog.at_level("INFO"):
-        await repository.delete_client("secret-code")
+        await repository.delete_client("secret-code", "alimentacao")
 
     # Assert
     assert "secret-code" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_should_not_log_sensitive_client_data(caplog: pytest.LogCaptureFixture) -> None:
+@pytest.mark.parametrize(
+    ("category_slug", "expected_key"),
+    [
+        ("alimentacao", "client_services_alimentacao.jsonl"),
+        ("servicos_profissionais", "client_services_servicos_profissionais.jsonl"),
+    ],
+)
+async def test_should_read_and_write_only_the_category_object(
+    category_slug: str, expected_key: str
+) -> None:
+    # Arrange
+    client = _client_with_body(_jsonl(_registration("111", "Floricultura")))
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act
+    await repository.save_client(_registration("222", "Padaria"), category_slug)
+
+    # Assert
+    client.get_object.assert_called_once_with(Bucket="acha-local", Key=expected_key)
+    assert client.put_object.call_args.kwargs["Key"] == expected_key
+    assert [record["user_code"] for record in _written_records(client)] == ["111", "222"]
+
+
+@pytest.mark.asyncio
+async def test_should_delete_from_the_category_object() -> None:
+    # Arrange
+    client = _client_with_body(_jsonl(_registration("111", "Salao")))
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act
+    await repository.delete_client("111", "beleza")
+
+    # Assert
+    client.get_object.assert_called_once_with(
+        Bucket="acha-local", Key="client_services_beleza.jsonl"
+    )
+    assert client.put_object.call_args.kwargs["Key"] == "client_services_beleza.jsonl"
+    assert client.put_object.call_args.kwargs["Body"] == b""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category_slug", ["", "   "])
+async def test_should_reject_blank_category_slug_without_calling_s3(
+    category_slug: str,
+) -> None:
+    # Arrange
+    client = MagicMock()
+    repository = ClientStorageRepository(client=client, config=_config())
+
+    # Act / Assert
+    with pytest.raises(ClientStorageError):
+        await repository.save_client(_registration(), category_slug)
+    with pytest.raises(ClientStorageError):
+        await repository.delete_client("111", category_slug)
+    client.get_object.assert_not_called()
+    client.put_object.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_should_log_object_key_with_category(caplog: pytest.LogCaptureFixture) -> None:
     # Arrange
     client = _client_with_body(None)
     repository = ClientStorageRepository(client=client, config=_config())
 
     # Act
     with caplog.at_level("INFO"):
-        await repository.save_client(_registration("secret-code", "Padaria"))
+        await repository.save_client(_registration("secret-code", "Padaria"), "moda")
 
     # Assert
+    assert "client_services_moda.jsonl" in caplog.text
     assert "secret-code" not in caplog.text

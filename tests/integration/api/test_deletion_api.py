@@ -87,3 +87,6 @@ def test_should_return_safe_internal_error_envelope(error: DomainError) -> None:
     assert body["status_code"] == 500
     assert body["errors"] == ["internal_error"]
     assert str(error) not in body["message"]
+
+
+# --- Real deletion service: category passed to storage ----------------------

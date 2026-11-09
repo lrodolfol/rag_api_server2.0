@@ -11,6 +11,7 @@ from app.domain.cache import (
     SemanticCacheEntry,
     SemanticCacheMatch,
 )
+from app.domain.category import Category, slugify
 from app.domain.company import (
     CompanyData,
     CompanyDeletionRequest,
@@ -37,6 +38,7 @@ from app.domain.search import OnlineChatSearchPayload, WhatsAppSearchPayload
 
 __all__ = [
     "CacheFingerprint",
+    "Category",
     "ChatAnswer",
     "ClientStorageError",
     "CompanyData",
@@ -59,4 +61,5 @@ __all__ = [
     "SemanticCacheMatch",
     "VectorRepositoryError",
     "WhatsAppSearchPayload",
+    "slugify",
 ]

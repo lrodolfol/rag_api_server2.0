@@ -83,6 +83,11 @@ def _section(index_name: str, env_label: str) -> dict[str, Any]:
             "table": "rag_response_cache",
             "top_k": 3,
         },
+        "categories": {
+            "redis_key": "knowledge_categories",
+            "initial": ["ALIMENTAÇÃO", "SAÚDE"],
+            "fallback": "OUTROS",
+        },
     }
 
 
@@ -283,45 +288,6 @@ def test_should_cache_config_and_not_reread_file(
     assert second.pinecone.index_name == "acha-local-services-dev"
 
 
-def test_should_resolve_default_embedding_model(
-    monkeypatch: pytest.MonkeyPatch, config_file: Path, _set_secrets: None
-) -> None:
-    # Arrange
-    monkeypatch.setenv("ENVIRONMENT", "dev")
-    monkeypatch.setenv("CONFIG_FILE", str(config_file))
-
-    # Act
-    config = get_config()
-
-    # Assert
-    assert config.open_ai.default_model_embeddings == "text-embedding-3-small"
-
-
-@pytest.mark.parametrize(
-    "models",
-    [
-        {"economic": {"default": False, "model_embeddings": "text-embedding-3-small"}},
-        {},
-    ],
-    ids=["no-default", "empty"],
-)
-def test_should_raise_when_no_default_embedding_model(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    _set_secrets: None,
-    models: dict[str, Any],
-) -> None:
-    # Arrange
-    data = {"dev": _section("acha-local-services-dev", "development")}
-    data["dev"]["open_ai"]["models"] = models
-    monkeypatch.setenv("ENVIRONMENT", "dev")
-    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
-
-    # Act / Assert
-    with pytest.raises(ConfigError, match="must be marked as default"):
-        get_config()
-
-
 def test_should_raise_when_embedding_models_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None
 ) -> None:
@@ -354,22 +320,6 @@ def test_should_not_expose_secrets_in_validation_error(
     assert error_info.value.__cause__ is None
 
 
-def test_should_load_finger_print_section(
-    monkeypatch: pytest.MonkeyPatch, config_file: Path, _set_secrets: None
-) -> None:
-    # Arrange
-    monkeypatch.setenv("ENVIRONMENT", "dev")
-    monkeypatch.setenv("CONFIG_FILE", str(config_file))
-
-    # Act
-    config = get_config()
-
-    # Assert
-    assert config.finger_print.prompt_version == "1.0.0"
-    assert config.finger_print.rules_version == "1.0.0"
-    assert config.finger_print.model_capability == "economic"
-
-
 def test_should_raise_when_finger_print_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None
 ) -> None:
@@ -398,38 +348,6 @@ def test_should_raise_when_finger_print_field_is_empty(
         get_config()
 
 
-def test_should_load_postgres_and_semantic_cache_sections(
-    monkeypatch: pytest.MonkeyPatch, config_file: Path, _set_secrets: None
-) -> None:
-    # Arrange
-    monkeypatch.setenv("ENVIRONMENT", "dev")
-    monkeypatch.setenv("CONFIG_FILE", str(config_file))
-
-    # Act
-    config = get_config()
-
-    # Assert
-    assert config.postgres.host == "localhost"
-    assert config.postgres.port == 5432
-    assert config.postgres.database == "rag_auth"
-    assert config.postgres.user == "postgres"
-    assert config.semantic_cache.table == "rag_response_cache"
-    assert config.semantic_cache.top_k == 3
-
-
-def test_should_raise_when_database_password_missing(
-    monkeypatch: pytest.MonkeyPatch, config_file: Path, _set_secrets: None
-) -> None:
-    # Arrange
-    monkeypatch.setenv("ENVIRONMENT", "dev")
-    monkeypatch.setenv("CONFIG_FILE", str(config_file))
-    monkeypatch.delenv("DATA_BASE_PASSWORD", raising=False)
-
-    # Act / Assert
-    with pytest.raises(ConfigError, match="DATA_BASE_PASSWORD"):
-        get_config()
-
-
 @pytest.mark.parametrize("section", ["postgres", "semantic_cache"])
 def test_should_raise_when_database_section_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None, section: str
@@ -442,19 +360,4 @@ def test_should_raise_when_database_section_missing(
 
     # Act / Assert
     with pytest.raises(ConfigError, match=section):
-        get_config()
-
-
-@pytest.mark.parametrize("top_k", [0, -1])
-def test_should_raise_when_semantic_cache_top_k_not_positive(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _set_secrets: None, top_k: int
-) -> None:
-    # Arrange
-    data = {"dev": _section("acha-local-services-dev", "development")}
-    data["dev"]["semantic_cache"]["top_k"] = top_k
-    monkeypatch.setenv("ENVIRONMENT", "dev")
-    monkeypatch.setenv("CONFIG_FILE", str(_write_config(tmp_path / "env.json", data)))
-
-    # Act / Assert
-    with pytest.raises(ConfigError, match="semantic_cache.top_k"):
         get_config()

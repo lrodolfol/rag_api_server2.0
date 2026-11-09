@@ -2,19 +2,29 @@
 
 Orchestrates the full registration flow for a company/business:
 
-* moderate the submitted content and stop when it is inappropriate;
-* normalise and split the content into chunks;
-* generate embeddings for each chunk;
-* replace the client's vectors in the vector store (delete + upsert);
-* persist the client record in object storage.
+* read the category names from the catalog (Redis);
+* moderate and classify the submitted content in a single LLM call, stopping
+  when it is inappropriate (before anything is persisted);
+* resolve the category (existing, new or the configured fallback), adding a new
+  one to the catalog;
+* read the client's previous category from its vectors (before the upsert,
+  which deletes them);
+* normalise, chunk and embed the content and replace the client's vectors
+  (delete + upsert) tagged with the category slug;
+* when the category changed, remove the client's record from the previous
+  category object in storage;
+* persist the client record in the object of its category.
 
 Normalisation and chunking are delegated to the text-processing helpers, and
 every external interaction is delegated to the existing infrastructure services,
 so this layer only coordinates the steps without duplicating their logic.
+``user_code`` values and client content are never logged.
 """
 
+from app.application.categories import CategoryService
 from app.application.text_processing import generate_chunks
 from app.domain import (
+    Category,
     CompanyData,
     CompanyRegistrationRequest,
     EmbeddingRecord,
@@ -36,10 +46,12 @@ class RegistrationService:
         openai_service: OpenAIService,
         vector_repository: PineconeVectorRepository,
         storage_repository: ClientStorageRepository,
+        category_service: CategoryService,
     ) -> None:
         self._openai = openai_service
         self._vectors = vector_repository
         self._storage = storage_repository
+        self._categories = category_service
 
     async def register(self, registration: CompanyRegistrationRequest) -> None:
         """Run the full ingestion flow for a single registration.
@@ -49,27 +61,44 @@ class RegistrationService:
         """
         logger.info("Starting company registration flow")
         company = registration.request
+        user_code = registration.user_code
         content = self._build_content(company)
-        await self._ensure_appropriate(content)
+        category = await self._moderate_and_classify(content)
+        previous_slug = await self._vectors.get_category_by_user_code(user_code)
         embeddings = await self._build_embeddings(content)
         logger.info("Upserting %d embeddings to vector store", len(embeddings))
         await self._vectors.upsert_company_vectors(
-            company.name, registration.user_code, embeddings
+            company.name, user_code, category.slug, embeddings
         )
+        await self._remove_from_previous_category(user_code, previous_slug, category.slug)
         logger.info("Persisting client record to object storage")
-        await self._storage.save_client(registration)
-        logger.info("Company registration completed")
+        await self._storage.save_client(registration, category.slug)
+        logger.info("Company registration completed (category='%s')", category.slug)
 
-    async def _ensure_appropriate(self, content: str) -> None:
-        """Moderate ``content`` and stop the flow when it is inappropriate."""
-        logger.info("Submitting content to OpenAI moderation")
-        result = await self._openai.moderate(content)
+    async def _moderate_and_classify(self, content: str) -> Category:
+        """Moderate ``content``, stop when inappropriate, and resolve its category."""
+        categories = await self._categories.list_names()
+        logger.info("Submitting content to OpenAI moderation and classification")
+        result = await self._openai.moderate(content, categories)
         if result.insult:
             logger.info("Registration rejected: inappropriate content detected")
             raise InappropriateContentError(
                 "Submitted content was rejected by moderation"
             )
         logger.info("Content moderation passed")
+        category = await self._categories.resolve_or_create(result.category)
+        logger.info("Registration category defined: '%s'", category.name)
+        return category
+
+    async def _remove_from_previous_category(
+        self, user_code: str, previous_slug: str | None, new_slug: str
+    ) -> None:
+        """Delete the client's record from the old category object when it changed."""
+        if previous_slug is None or previous_slug == new_slug:
+            logger.info("Client category unchanged (category='%s')", new_slug)
+            return
+        logger.info("Client category changed from '%s' to '%s'", previous_slug, new_slug)
+        await self._storage.delete_client(user_code, previous_slug)
 
     async def _build_embeddings(self, content: str) -> list[EmbeddingRecord]:
         """Normalise, chunk and embed ``content``."""

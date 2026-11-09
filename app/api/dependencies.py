@@ -11,6 +11,7 @@ from functools import lru_cache
 from redis.asyncio import Redis
 
 from app.application.cache import SemanticCacheService
+from app.application.categories import CategoryService
 from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
@@ -24,6 +25,7 @@ from app.infrastructure.postgres import PostgresSemanticCacheRepository
 from app.infrastructure.rate_limit import InMemoryRateLimiter
 from app.infrastructure.redis import (
     RedisAnswerCacheRepository,
+    RedisCategoryRepository,
     RedisHistoryRepository,
     create_redis_client,
 )
@@ -53,7 +55,7 @@ def _storage_repository() -> ClientStorageRepository:
 
 @lru_cache
 def _redis_client() -> Redis:
-    # Shared by the history and answer-cache repositories: one connection pool.
+    # Shared by every Redis repository: one connection pool.
     config: AppConfig = get_config()
     return create_redis_client(config.redis)
 
@@ -66,6 +68,20 @@ def _history_repository() -> RedisHistoryRepository:
 @lru_cache
 def _answer_cache_repository() -> RedisAnswerCacheRepository:
     return RedisAnswerCacheRepository(client=_redis_client())
+
+
+@lru_cache
+def _category_repository() -> RedisCategoryRepository:
+    return RedisCategoryRepository(
+        client=_redis_client(), config=get_config().categories
+    )
+
+
+@lru_cache
+def _category_service() -> CategoryService:
+    return CategoryService(
+        repository=_category_repository(), config=get_config().categories
+    )
 
 
 @lru_cache
@@ -94,6 +110,7 @@ def get_registration_service() -> RegistrationService:
         openai_service=_openai_service(),
         vector_repository=_vector_repository(),
         storage_repository=_storage_repository(),
+        category_service=_category_service(),
     )
 
 
@@ -114,7 +131,13 @@ def get_search_service() -> SearchService:
         answer_cache=_answer_cache_repository(),
         semantic_cache=_semantic_cache_service(),
         fingerprint_config=get_config().finger_print,
+        category_service=_category_service(),
     )
+
+
+def get_category_service() -> CategoryService:
+    """Provide the knowledge-base categories service backed by the Redis catalog."""
+    return _category_service()
 
 
 def get_rate_limiter() -> InMemoryRateLimiter:

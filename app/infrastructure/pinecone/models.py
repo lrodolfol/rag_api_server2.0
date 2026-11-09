@@ -12,7 +12,8 @@ class VectorMatch(BaseModel):
     """A single similarity match returned by a vector query.
 
     ``score`` is the cosine similarity reported by Pinecone; only matches above
-    the configured threshold are surfaced. ``text`` and ``user_code`` come from
+    the configured threshold are surfaced. ``text``, ``user_code`` and
+    ``category`` (slug, ``""`` for vectors stored before categories) come from
     the stored metadata.
     """
 
@@ -20,3 +21,4 @@ class VectorMatch(BaseModel):
     score: float
     text: str
     user_code: str
+    category: str = ""

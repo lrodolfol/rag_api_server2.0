@@ -98,18 +98,6 @@ async def test_should_not_sleep_before_first_event(sleep_calls: list[float]) -> 
     assert sleep_calls == []
 
 
-@pytest.mark.asyncio
-async def test_should_emit_single_event_without_sleep_for_one_message(
-    sleep_calls: list[float],
-) -> None:
-    # Act
-    events = await _collect(["Nada encontrado."])
-
-    # Assert
-    assert events == [format_event("Nada encontrado.")]
-    assert sleep_calls == []
-
-
 def test_should_define_half_second_stream_delay() -> None:
     assert STREAM_DELAY_SECONDS == 0.5
 

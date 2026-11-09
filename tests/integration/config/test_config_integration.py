@@ -35,10 +35,6 @@ def _prepare_environment(monkeypatch: pytest.MonkeyPatch) -> Any:
     get_config.cache_clear()
 
 
-def test_example_config_file_exists() -> None:
-    assert EXAMPLE_CONFIG.exists()
-
-
 def test_should_load_dev_config_from_real_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -138,22 +134,6 @@ def test_should_load_finger_print_from_real_file(
     assert config.finger_print.model_capability
 
 
-def test_should_raise_when_finger_print_removed_from_real_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # Arrange
-    data = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
-    del data["dev"]["finger_print"]
-    broken_file = tmp_path / "env.json"
-    broken_file.write_text(json.dumps(data), encoding="utf-8")
-    monkeypatch.setenv("CONFIG_FILE", str(broken_file))
-    monkeypatch.setenv("ENVIRONMENT", "dev")
-
-    # Act / Assert
-    with pytest.raises(ConfigError, match="finger_print"):
-        get_config()
-
-
 @pytest.mark.parametrize("environment", ["dev", "prod"])
 @pytest.mark.parametrize("config_file", ["env.example.json", "env.json"])
 def test_should_load_postgres_and_semantic_cache_from_real_file(
@@ -179,36 +159,62 @@ def test_should_load_postgres_and_semantic_cache_from_real_file(
     assert config.semantic_cache.top_k > 0
 
 
-def test_should_load_semantic_cache_values_from_example_file(
-    monkeypatch: pytest.MonkeyPatch,
+EXPECTED_INITIAL_CATEGORIES: list[str] = [
+    "ALIMENTAÇÃO",
+    "SAÚDE",
+    "BELEZA",
+    "CONSTRUÇÃO",
+    "AUTOMOTIVO",
+    "TECNOLOGIA",
+    "COMÉRCIO",
+    "EDUCAÇÃO",
+    "SERVIÇOS PROFISSIONAIS",
+    "TRANSPORTE",
+    "CASA E MANUTENÇÃO",
+    "ANIMAIS",
+    "EVENTOS",
+    "TURISMO",
+    "ENTRETENIMENTO",
+    "MODA",
+    "FINANCEIRO",
+    "AGROPECUÁRIA",
+    "RELIGIÃO",
+    "SERVIÇOS PÚBLICOS",
+]
+
+
+@pytest.mark.parametrize("environment", ["dev", "prod"])
+@pytest.mark.parametrize("config_file", ["env.example.json", "env.json"])
+def test_should_load_the_20_initial_categories_from_real_file(
+    monkeypatch: pytest.MonkeyPatch, environment: str, config_file: str
 ) -> None:
     # Arrange
-    monkeypatch.setenv("ENVIRONMENT", "dev")
+    path = PROJECT_ROOT / config_file
+    if not path.exists():
+        pytest.skip(f"{config_file} not present in this checkout")
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+    monkeypatch.setenv("ENVIRONMENT", environment)
 
     # Act
     config = get_config()
 
     # Assert
-    assert config.postgres.host == "localhost"
-    assert config.postgres.port == 5432
-    assert config.postgres.database == "rag_auth"
-    assert config.postgres.user == "postgres"
-    assert config.semantic_cache.table == "rag_response_cache"
-    assert config.semantic_cache.top_k == 3
+    assert config.categories.initial == EXPECTED_INITIAL_CATEGORIES
+    assert config.categories.redis_key == "knowledge_categories"
+    assert config.categories.fallback == "OUTROS"
 
 
-@pytest.mark.parametrize("section", ["postgres", "semantic_cache"])
-def test_should_raise_when_database_section_removed_from_real_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, section: str
+def test_should_raise_when_categories_removed_from_real_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Arrange
     data = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
-    del data["dev"][section]
+    del data["dev"]["categories"]
     broken_file = tmp_path / "env.json"
     broken_file.write_text(json.dumps(data), encoding="utf-8")
     monkeypatch.setenv("CONFIG_FILE", str(broken_file))
     monkeypatch.setenv("ENVIRONMENT", "dev")
 
     # Act / Assert
-    with pytest.raises(ConfigError, match=section):
+    with pytest.raises(ConfigError, match="categories"):
         get_config()

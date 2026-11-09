@@ -2,6 +2,7 @@
 
 Wires together logging, configuration and the API routers, exposing a
 ``create_app`` factory and a module-level ``app`` instance for ASGI servers.
+On startup the initial knowledge-base categories are seeded into Redis.
 """
 
 from contextlib import asynccontextmanager
@@ -9,8 +10,10 @@ from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 
+from app.api.dependencies import get_category_service
 from app.api.errors import register_exception_handlers
 from app.api.routes import chat, health, registration, whatsapp
+from app.application.categories import CategoryService
 from app.infrastructure.logging.logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -19,8 +22,18 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
     logger.info("Application starting", extra={"environment": "development"})
+    await _seed_categories(application)
     yield
     logger.info("Application shutting down")
+
+
+async def _seed_categories(application: FastAPI) -> None:
+    # Honour dependency overrides so tests can start the app without real Redis.
+    provider = application.dependency_overrides.get(
+        get_category_service, get_category_service
+    )
+    category_service: CategoryService = provider()
+    await category_service.seed_initial()
 
 
 def create_app() -> FastAPI:

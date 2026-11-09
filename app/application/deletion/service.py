@@ -4,7 +4,11 @@ Orchestrates the removal of a client's data:
 
 * check whether the client has any vector in the vector store;
 * when it has none, do nothing (the request still succeeds);
-* otherwise delete its vectors and then its record in object storage.
+* otherwise read the client's category from its vectors (before deleting them,
+  since the category only lives in their metadata), delete the vectors and then
+  remove its record from the object storage file of that category;
+* vectors stored before categories existed have no category: they are deleted,
+  storage is left untouched and a warning is logged (the legacy record stays).
 
 Every external interaction is delegated to the existing infrastructure
 repositories; their domain errors propagate so the API layer can translate them
@@ -33,9 +37,21 @@ class DeletionService:
     async def delete(self, request: CompanyDeletionRequest) -> None:
         """Delete the client's data when it has vectors; otherwise do nothing."""
         logger.info("Starting company deletion flow")
-        if not await self._vectors.has_vectors_for_user_code(request.user_code):
+        user_code = request.user_code
+        if not await self._vectors.has_vectors_for_user_code(user_code):
             logger.info("No vectors found for client; nothing to delete")
             return
-        await self._vectors.delete_by_user_code(request.user_code)
-        await self._storage.delete_client(request.user_code)
+        category_slug = await self._vectors.get_category_by_user_code(user_code)
+        await self._vectors.delete_by_user_code(user_code)
+        await self._delete_stored_record(user_code, category_slug)
         logger.info("Company deletion completed")
+
+    async def _delete_stored_record(self, user_code: str, category_slug: str | None) -> None:
+        """Remove the record from its category file; skip legacy uncategorized data."""
+        if category_slug is None:
+            logger.warning(
+                "Client vectors had no category; legacy record was not removed from the bucket"
+            )
+            return
+        logger.info("Removing client record from category '%s'", category_slug)
+        await self._storage.delete_client(user_code, category_slug)

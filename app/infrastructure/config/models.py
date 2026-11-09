@@ -1,8 +1,8 @@
 """Typed configuration models.
 
 Each application concern (OpenAI, Pinecone, Redis, PostgreSQL, company, bucket,
-semantic cache) is modelled as its own section so the rest of the codebase
-depends on a single, validated configuration object instead of reading
+semantic cache, categories) is modelled as its own section so the rest of the
+codebase depends on a single, validated configuration object instead of reading
 environment data ad hoc.
 
 Secrets use ``pydantic.SecretStr`` so their values are masked in logs, ``repr``
@@ -11,7 +11,14 @@ and tracebacks, preventing accidental leakage of sensitive data.
 
 from typing import Self
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 
 class EmbeddingModelConfig(BaseModel):
@@ -131,6 +138,28 @@ class SemanticCacheConfig(BaseModel):
     top_k: int = Field(gt=0)
 
 
+class CategoriesConfig(BaseModel):
+    """Knowledge-base categories catalog.
+
+    ``redis_key`` is the Redis SET holding the category names, ``initial`` the
+    names seeded on startup and ``fallback`` the category used when none is
+    given during registration. Values are stripped, so blank ones are rejected.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    redis_key: str = Field(min_length=1)
+    initial: list[str] = Field(min_length=1)
+    fallback: str = Field(min_length=1)
+
+    @field_validator("initial")
+    @classmethod
+    def _reject_blank_names(cls, names: list[str]) -> list[str]:
+        if any(not name.strip() for name in names):
+            raise ValueError("Category names must not be blank")
+        return names
+
+
 class AppConfig(BaseModel):
     """Root configuration object aggregating every section."""
 
@@ -143,3 +172,4 @@ class AppConfig(BaseModel):
     finger_print: FingerPrintConfig
     postgres: PostgresConfig
     semantic_cache: SemanticCacheConfig
+    categories: CategoriesConfig

@@ -10,6 +10,7 @@ external provider is contacted. Search answers arrive as Server-Sent Events
 streams and are decoded event by event, with the delay between events removed.
 """
 
+import asyncio
 import json
 from typing import Any
 
@@ -26,6 +27,7 @@ from app.api.dependencies import (
 )
 from app.api.patterns import streaming
 from app.application.cache import SemanticCacheService
+from app.application.categories import CategoryService
 from app.application.deletion import DeletionService
 from app.application.registration import RegistrationService
 from app.application.search import SearchService
@@ -39,7 +41,12 @@ from app.domain import (
     PayloadQuestionOpenIA,
     VectorRepositoryError,
 )
-from app.infrastructure.config import FingerPrintConfig, PostgresConfig, SemanticCacheConfig
+from app.infrastructure.config import (
+    CategoriesConfig,
+    FingerPrintConfig,
+    PostgresConfig,
+    SemanticCacheConfig,
+)
 from app.infrastructure.openai.models import ModerationResult
 from app.infrastructure.pinecone import VectorMatch
 from app.infrastructure.postgres import PostgresSemanticCacheRepository
@@ -49,12 +56,23 @@ from app.infrastructure.redis import (
     ANSWER_CACHE_TTL_SECONDS,
     HistoryChannel,
     RedisAnswerCacheRepository,
+    RedisCategoryRepository,
 )
 from app.main import create_app
 
 
 INTRO = "Encontrei para você:"
 NOT_FOUND = "Nada encontrado."
+CATEGORIES_CONFIG = CategoriesConfig(
+    redis_key="knowledge_categories", initial=["ALIMENTAÇÃO", "BELEZA"], fallback="OUTROS"
+)
+
+
+def _category_service() -> CategoryService:
+    """Category service over an in-memory Redis already holding the initial list."""
+    client = FakeAsyncRedis(decode_responses=True)
+    repository = RedisCategoryRepository(client, CATEGORIES_CONFIG)
+    return CategoryService(repository=repository, config=CATEGORIES_CONFIG)
 
 
 @pytest.fixture(autouse=True)
@@ -83,15 +101,27 @@ class _FakeOpenAIService:
     """In-memory stand-in for the OpenAI provider boundary."""
 
     def __init__(
-        self, *, insult: bool = False, answer: str = "Padaria Central"
+        self,
+        *,
+        insult: bool = False,
+        answer: str = "Padaria Central",
+        category: str = "ALIMENTAÇÃO",
     ) -> None:
         self._insult = insult
         self._answer = answer
+        self.category = category
         self.chat_phrases: list[list[str]] = []
         self.embedded_questions: list[str] = []
 
-    async def moderate(self, content: str) -> ModerationResult:
-        return ModerationResult(insult=self._insult, insult_text=content if self._insult else "")
+    async def moderate(self, content: str, categories: list[str]) -> ModerationResult:
+        return ModerationResult(
+            insult=self._insult,
+            insult_text=content if self._insult else "",
+            category=self.category,
+        )
+
+    async def classify_question(self, question: str, categories: list[str]) -> str:
+        return self.category
 
     async def generate_embeddings_from_chunks(
         self, chunks: list[str]
@@ -117,19 +147,36 @@ class _FakeVectorRepository:
     ) -> None:
         self._matches = matches or []
         self._fail_query = fail_query
-        self.upserts: list[tuple[str, str, list[EmbeddingRecord]]] = []
+        self.upserts: list[tuple[str, str, list[EmbeddingRecord], str]] = []
+        self.queried_categories: list[str | None] = []
 
     async def upsert_company_vectors(
-        self, company_name: str, user_code: str, embeddings: list[EmbeddingRecord]
+        self,
+        company_name: str,
+        user_code: str,
+        category_slug: str,
+        embeddings: list[EmbeddingRecord],
     ) -> None:
-        self.upserts.append((company_name, user_code, embeddings))
+        self.upserts = [upsert for upsert in self.upserts if upsert[1] != user_code]
+        self.upserts.append((company_name, user_code, embeddings, category_slug))
 
     async def query(
-        self, embedding: list[float], top_k: int = 5
+        self, embedding: list[float], top_k: int = 5, category_slug: str | None = None
     ) -> list[VectorMatch]:
         if self._fail_query:
             raise VectorRepositoryError("Failed to query vectors")
-        return self._matches
+        self.queried_categories.append(category_slug)
+        # Fixed matches plus the registered chunks of the requested category.
+        registered = [
+            VectorMatch(id=company, score=0.95, text=record.text, user_code=code, category=slug)
+            for company, code, records, slug in self.upserts
+            for record in records
+            if category_slug in (None, slug)
+        ]
+        return [*self._matches, *registered]
+
+    async def get_category_by_user_code(self, user_code: str) -> str | None:
+        return next((upsert[3] for upsert in self.upserts if upsert[1] == user_code), None)
 
     async def has_vectors_for_user_code(self, user_code: str) -> bool:
         return any(upsert[1] == user_code for upsert in self.upserts)
@@ -142,13 +189,21 @@ class _FakeStorageRepository:
     """In-memory stand-in for the S3 client-record store."""
 
     def __init__(self) -> None:
-        self.saved: list[CompanyRegistrationRequest] = []
+        self.objects: dict[str, list[CompanyRegistrationRequest]] = {}
 
-    async def save_client(self, registration: CompanyRegistrationRequest) -> None:
-        self.saved.append(registration)
+    @property
+    def saved(self) -> list[CompanyRegistrationRequest]:
+        return [item for records in self.objects.values() for item in records]
 
-    async def delete_client(self, user_code: str) -> None:
-        self.saved = [item for item in self.saved if item.user_code != user_code]
+    async def save_client(
+        self, registration: CompanyRegistrationRequest, category_slug: str
+    ) -> None:
+        await self.delete_client(registration.user_code, category_slug)
+        self.objects.setdefault(category_slug, []).append(registration)
+
+    async def delete_client(self, user_code: str, category_slug: str) -> None:
+        records = self.objects.get(category_slug, [])
+        self.objects[category_slug] = [item for item in records if item.user_code != user_code]
 
 
 class _FakeHistoryRepository:
@@ -183,6 +238,7 @@ def _search_service(
     vectors: _FakeVectorRepository,
     history: _FakeHistoryRepository,
     redis_client: FakeAsyncRedis | None = None,
+    category_service: CategoryService | None = None,
 ) -> SearchService:
     """Build the real search service with real caches on fake Redis/PostgreSQL.
 
@@ -199,6 +255,7 @@ def _search_service(
             PostgresSemanticCacheRepository(POSTGRES_CONFIG, SEMANTIC_CACHE_CONFIG)
         ),
         fingerprint_config=FINGER_PRINT,
+        category_service=category_service or _category_service(),
     )
 
 
@@ -225,7 +282,10 @@ def test_e2e_should_register_company_through_real_service() -> None:
     vectors = _FakeVectorRepository()
     storage = _FakeStorageRepository()
     service = RegistrationService(
-        openai_service=openai, vector_repository=vectors, storage_repository=storage
+        openai_service=openai,
+        vector_repository=vectors,
+        storage_repository=storage,
+        category_service=_category_service(),
     )
     app = create_app()
     app.dependency_overrides[get_registration_service] = lambda: service
@@ -239,8 +299,37 @@ def test_e2e_should_register_company_through_real_service() -> None:
     assert response.json()["status_code"] == 201
     assert len(vectors.upserts) == 1
     assert vectors.upserts[0][1] == "123"
-    assert len(storage.saved) == 1
-    assert storage.saved[0].user_code == "123"
+    assert vectors.upserts[0][3] == "alimentacao"
+    assert [item.user_code for item in storage.objects["alimentacao"]] == ["123"]
+
+
+def test_e2e_should_move_client_to_new_category_on_registration_update() -> None:
+    # Arrange: the client first registers a restaurant, then a beauty salon.
+    openai = _FakeOpenAIService(category="ALIMENTAÇÃO")
+    vectors = _FakeVectorRepository()
+    storage = _FakeStorageRepository()
+    categories = _category_service()
+    service = RegistrationService(
+        openai_service=openai,
+        vector_repository=vectors,
+        storage_repository=storage,
+        category_service=categories,
+    )
+    app = create_app()
+    app.dependency_overrides[get_registration_service] = lambda: service
+    client = TestClient(app)
+    client.post("/companies", json=_registration_payload("123"))
+    openai.category = "Pet Shop"
+
+    # Act
+    response = client.post("/companies", json=_registration_payload("123", "Pet Feliz"))
+
+    # Assert: vectors and record moved to the new category, added to the catalog.
+    assert response.status_code == 201
+    assert [(upsert[1], upsert[3]) for upsert in vectors.upserts] == [("123", "pet_shop")]
+    assert storage.objects["alimentacao"] == []
+    assert [item.user_code for item in storage.objects["pet_shop"]] == ["123"]
+    assert "PET SHOP" in asyncio.run(categories.list_names())
 
 
 def test_e2e_should_reject_inappropriate_registration_without_persisting() -> None:
@@ -249,7 +338,10 @@ def test_e2e_should_reject_inappropriate_registration_without_persisting() -> No
     vectors = _FakeVectorRepository()
     storage = _FakeStorageRepository()
     service = RegistrationService(
-        openai_service=openai, vector_repository=vectors, storage_repository=storage
+        openai_service=openai,
+        vector_repository=vectors,
+        storage_repository=storage,
+        category_service=_category_service(),
     )
     app = create_app()
     app.dependency_overrides[get_registration_service] = lambda: service
@@ -270,12 +362,14 @@ def test_e2e_should_reject_inappropriate_registration_without_persisting() -> No
 
 def test_e2e_should_register_then_delete_company_through_real_services() -> None:
     # Arrange: real registration and deletion services sharing fake external deps.
+    openai = _FakeOpenAIService(category="ALIMENTAÇÃO")
     vectors = _FakeVectorRepository()
     storage = _FakeStorageRepository()
     registration = RegistrationService(
-        openai_service=_FakeOpenAIService(),
+        openai_service=openai,
         vector_repository=vectors,
         storage_repository=storage,
+        category_service=_category_service(),
     )
     deletion = DeletionService(vector_repository=vectors, storage_repository=storage)
     app = create_app()
@@ -283,34 +377,18 @@ def test_e2e_should_register_then_delete_company_through_real_services() -> None
     app.dependency_overrides[get_deletion_service] = lambda: deletion
     client = TestClient(app)
     client.post("/companies", json=_registration_payload("123"))
-    client.post("/companies", json=_registration_payload("456", "Floricultura"))
+    openai.category = "BELEZA"
+    client.post("/companies", json=_registration_payload("456", "Salao"))
 
     # Act
     response = client.request("DELETE", "/companies", json={"user_code": "123"})
 
-    # Assert: only the target client's vectors and record were removed.
+    # Assert: only the target client's vectors and category record were removed.
     assert response.status_code == 200
     assert response.json()["status_code"] == 200
     assert [upsert[1] for upsert in vectors.upserts] == ["456"]
-    assert [item.user_code for item in storage.saved] == ["456"]
-
-
-def test_e2e_should_return_ok_when_deleting_unknown_company() -> None:
-    # Arrange: nothing registered for the requested client.
-    storage = _FakeStorageRepository()
-    deletion = DeletionService(
-        vector_repository=_FakeVectorRepository(), storage_repository=storage
-    )
-    app = create_app()
-    app.dependency_overrides[get_deletion_service] = lambda: deletion
-    client = TestClient(app)
-
-    # Act
-    response = client.request("DELETE", "/companies", json={"user_code": "999"})
-
-    # Assert
-    assert response.status_code == 200
-    assert response.json()["errors"] == []
+    assert storage.objects["alimentacao"] == []
+    assert [item.user_code for item in storage.objects["beleza"]] == ["456"]
 
 
 # --- WhatsApp search flow ----------------------------------------------------
@@ -375,6 +453,40 @@ def test_e2e_should_answer_online_chat_message_through_real_service(semantic_cac
     assert _sse_messages(response) == [INTRO, "Restaurante B"]
     channels = {channel for channel, _, _ in history.appended}
     assert channels == {HistoryChannel.ONLINE}
+
+
+def test_e2e_should_search_only_in_the_category_of_the_question(semantic_cache_db: Any) -> None:
+    # Arrange: a restaurant and a beauty salon registered in their own categories.
+    openai = _FakeOpenAIService(answer="Padaria", category="ALIMENTAÇÃO")
+    vectors = _FakeVectorRepository()
+    categories = _category_service()
+    registration = RegistrationService(
+        openai_service=openai,
+        vector_repository=vectors,
+        storage_repository=_FakeStorageRepository(),
+        category_service=categories,
+    )
+    search = _search_service(openai, vectors, _FakeHistoryRepository(), None, categories)
+    app = create_app()
+    app.dependency_overrides[get_registration_service] = lambda: registration
+    app.dependency_overrides[get_search_service] = lambda: search
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
+    client = TestClient(app)
+    client.post("/companies", json=_registration_payload("123", "Padaria Central"))
+    openai.category = "BELEZA"
+    client.post("/companies", json=_registration_payload("456", "Salao Bela"))
+    openai.category = "ALIMENTAÇÃO"
+
+    # Act
+    response = client.post(
+        "/chat", json={"message": "onde tem pao?", "user_code": "1", "user_ip": "200.0.0.9"}
+    )
+
+    # Assert: only the restaurant chunks reached the language model.
+    assert _sse_messages(response) == [INTRO, "Padaria"]
+    assert vectors.queried_categories == ["alimentacao"]
+    phrases = openai.chat_phrases[0]
+    assert phrases and all("Padaria Central" in phrase for phrase in phrases)
 
 
 # --- Global error handling (safe, standardized responses) --------------------

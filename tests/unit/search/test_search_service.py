@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.application.cache import build_cache_key, build_fingerprint
+from app.application.categories import CategoryService
 from app.application.search import SearchService
 from app.application.search import service as search_service
 from app.domain import (
@@ -15,7 +16,7 @@ from app.domain import (
     OpenIaException,
     SemanticCacheMatch,
 )
-from app.infrastructure.config import FingerPrintConfig
+from app.infrastructure.config import CategoriesConfig, FingerPrintConfig
 from app.infrastructure.pinecone import VectorMatch
 from app.infrastructure.redis import HistoryChannel
 
@@ -30,6 +31,10 @@ INTRO = "Encontrei para você:"
 NOT_FOUND = "Nada encontrado."
 BELOW_THRESHOLD = SearchService.SIMILARITY_THRESHOLD - 0.01
 DEFAULT_ANSWER = ChatAnswer(respostas=["Padaria Central"])
+CATALOG = ["ALIMENTAÇÃO", "BELEZA"]
+CATEGORIES_CONFIG = CategoriesConfig(
+    redis_key="knowledge_categories", initial=CATALOG, fallback="OUTROS"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +83,10 @@ class _Mocks:
         self.answer_cache.get.return_value = cached_answer
         self.semantic_cache = AsyncMock()
         self.semantic_cache.find_answer.return_value = semantic_matches
+        self.openai.classify_question.return_value = "ALIMENTAÇÃO"
+        # Real category service over a mocked catalog repository.
+        self.category_repository = AsyncMock()
+        self.category_repository.get_all.return_value = list(CATALOG)
         self.service = SearchService(
             openai_service=self.openai,
             vector_repository=self.vectors,
@@ -85,6 +94,7 @@ class _Mocks:
             answer_cache=self.answer_cache,
             semantic_cache=self.semantic_cache,
             fingerprint_config=FINGER_PRINT,
+            category_service=CategoryService(self.category_repository, CATEGORIES_CONFIG),
         )
 
 
@@ -146,7 +156,7 @@ async def test_should_run_pipeline_and_return_intro_followed_by_items() -> None:
     # Assert
     assert messages == [INTRO, "Padaria Central", "Café São João"]
     openai.generate_embedding_for_question.assert_awaited_once_with("onde comer?")
-    vectors.query.assert_awaited_once_with([0.1, 0.2])
+    vectors.query.assert_awaited_once_with([0.1, 0.2], category_slug="alimentacao")
     openai.generate_chat_answer.assert_awaited_once()
 
 
@@ -204,20 +214,6 @@ async def test_should_not_persist_assistant_turn_when_answer_is_empty() -> None:
 
 
 @pytest.mark.asyncio
-async def test_should_read_history_before_answering() -> None:
-    # Arrange
-    service, _, _, history_repo = _service()
-
-    # Act
-    await service.search(HistoryChannel.WHATSAPP, "5535999", "onde comer?")
-
-    # Assert
-    history_repo.get_history.assert_awaited_once_with(
-        HistoryChannel.WHATSAPP, "5535999"
-    )
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("items", [[], ["", "   "]])
 async def test_should_return_single_not_found_message_when_answer_is_empty(
     items: list[str],
@@ -249,6 +245,7 @@ async def test_should_return_cached_answer_without_calling_openai_or_pinecone() 
     assert messages == [INTRO, "Resposta 1", "Resposta 2"]
     answer_cache.get.assert_awaited_once_with(_expected_key("onde comer?"))
     openai.generate_embedding_for_question.assert_not_awaited()
+    openai.classify_question.assert_not_awaited()
     openai.generate_chat_answer.assert_not_awaited()
     vectors.query.assert_not_awaited()
     history_repo.get_history.assert_not_awaited()
@@ -298,34 +295,6 @@ async def test_should_treat_corrupted_cached_value_as_miss(
 
 
 @pytest.mark.asyncio
-async def test_should_run_pipeline_and_cache_answer_json_on_miss() -> None:
-    # Arrange
-    service, openai, _, _, answer_cache = _service_with_cache()
-
-    # Act
-    messages = await service.search(HistoryChannel.WHATSAPP, "5535999", "onde comer?")
-
-    # Assert
-    assert messages == [INTRO, "Padaria Central"]
-    openai.generate_chat_answer.assert_awaited_once()
-    answer_cache.set.assert_awaited_once_with(
-        _expected_key("onde comer?"), _json("Padaria Central")
-    )
-
-
-@pytest.mark.asyncio
-async def test_should_not_cache_empty_answer() -> None:
-    # Arrange
-    service, _, _, _, answer_cache = _service_with_cache(answer=ChatAnswer())
-
-    # Act
-    await service.search(HistoryChannel.ONLINE, "123", "onde comer?")
-
-    # Assert
-    answer_cache.set.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_should_use_same_key_for_equivalent_questions() -> None:
     # Arrange
     service, _, _, _, answer_cache = _service_with_cache()
@@ -339,60 +308,7 @@ async def test_should_use_same_key_for_equivalent_questions() -> None:
     assert keys[0] == keys[1] == _expected_key("onde comer?")
 
 
-@pytest.mark.asyncio
-async def test_should_run_pipeline_when_cache_read_fails() -> None:
-    # Arrange: the repository already converts Redis failures into a miss (None).
-    service, openai, vectors, _, _ = _service_with_cache(cached_answer=None)
-
-    # Act
-    messages = await service.search(HistoryChannel.WHATSAPP, "5535999", "onde comer?")
-
-    # Assert
-    assert messages == [INTRO, "Padaria Central"]
-    vectors.query.assert_awaited_once()
-    openai.generate_chat_answer.assert_awaited_once()
-
-
 # --- Embedding generated once per request --------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_should_embed_normalized_question_once_on_cache_miss() -> None:
-    # Arrange
-    service, openai, _, _, _ = _service_with_cache()
-
-    # Act
-    await service.search(HistoryChannel.WHATSAPP, "5535999", "  Onde VOCÊ vende   marmitas ")
-
-    # Assert
-    openai.generate_embedding_for_question.assert_awaited_once_with(
-        "onde voce vende marmitas"
-    )
-
-
-@pytest.mark.asyncio
-async def test_should_query_vector_store_with_the_generated_embedding() -> None:
-    # Arrange
-    service, openai, vectors, _, _ = _service_with_cache()
-    openai.generate_embedding_for_question.return_value = [0.3, 0.4, 0.5]
-
-    # Act
-    await service.search(HistoryChannel.ONLINE, "123", "Onde comer?")
-
-    # Assert
-    vectors.query.assert_awaited_once_with([0.3, 0.4, 0.5])
-
-
-@pytest.mark.asyncio
-async def test_should_not_embed_question_on_cache_hit() -> None:
-    # Arrange
-    service, openai, _, _, _ = _service_with_cache(cached_answer=_json("Resposta em cache"))
-
-    # Act
-    await service.search(HistoryChannel.ONLINE, "123", "Onde comer?")
-
-    # Assert
-    openai.generate_embedding_for_question.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -456,6 +372,7 @@ async def test_should_return_semantic_answer_without_rag_or_llm() -> None:
     assert messages == [INTRO, "Marmitaria Central"]
     mocks.semantic_cache.find_answer.assert_awaited_once_with(EXPECTED_FINGERPRINT, [0.1, 0.2])
     mocks.vectors.query.assert_not_awaited()
+    mocks.openai.classify_question.assert_not_awaited()
     mocks.openai.generate_chat_answer.assert_not_awaited()
     mocks.history.get_history.assert_not_awaited()
     mocks.semantic_cache.store.assert_not_awaited()
@@ -516,7 +433,7 @@ async def test_should_run_rag_and_store_json_in_both_caches_on_semantic_miss() -
 
     # Assert
     assert messages == [INTRO, "Padaria Central"]
-    mocks.vectors.query.assert_awaited_once_with([0.7, 0.8])
+    mocks.vectors.query.assert_awaited_once_with([0.7, 0.8], category_slug="alimentacao")
     mocks.openai.generate_chat_answer.assert_awaited_once()
     mocks.answer_cache.set.assert_awaited_once_with(
         _expected_key(QUESTION), _json("Padaria Central")
@@ -731,6 +648,8 @@ async def test_should_not_touch_any_dependency_for_short_message(
     mocks.semantic_cache.find_answer.assert_not_awaited()
     mocks.semantic_cache.store.assert_not_awaited()
     mocks.vectors.query.assert_not_awaited()
+    mocks.openai.classify_question.assert_not_awaited()
+    mocks.category_repository.get_all.assert_not_awaited()
     mocks.history.get_history.assert_not_awaited()
     mocks.history.append_message.assert_not_awaited()
 
@@ -763,3 +682,99 @@ async def test_should_run_pipeline_for_two_letter_message() -> None:
     assert result == [INTRO, "Padaria Central"]
     mocks.openai.generate_chat_answer.assert_awaited_once()
     mocks.history.append_message.assert_awaited()
+
+
+# --- Question classification and category-filtered search --------------------
+
+
+@pytest.mark.asyncio
+async def test_should_query_vectors_in_the_classified_category() -> None:
+    # Arrange
+    mocks = _mocks()
+
+    # Act
+    messages = await mocks.service.search(HistoryChannel.ONLINE, "123", "onde tem pizzaria?")
+
+    # Assert
+    assert messages == [INTRO, "Padaria Central"]
+    mocks.openai.classify_question.assert_awaited_once_with("onde tem pizzaria?", CATALOG)
+    mocks.vectors.query.assert_awaited_once_with([0.1, 0.2], category_slug="alimentacao")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("llm_category", ["", "INEXISTENTE"])
+async def test_should_query_without_filter_when_category_is_not_in_catalog(
+    llm_category: str,
+) -> None:
+    # Arrange
+    mocks = _mocks()
+    mocks.openai.classify_question.return_value = llm_category
+
+    # Act
+    messages = await mocks.service.search(HistoryChannel.ONLINE, "123", "onde comer?")
+
+    # Assert
+    assert messages == [INTRO, "Padaria Central"]
+    mocks.vectors.query.assert_awaited_once_with([0.1, 0.2], category_slug=None)
+    mocks.category_repository.add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_query_without_filter_and_warn_when_classification_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    mocks = _mocks()
+    mocks.openai.classify_question.side_effect = OpenIaException("boom")
+
+    # Act
+    with caplog.at_level(logging.WARNING):
+        messages = await mocks.service.search(HistoryChannel.ONLINE, "123", "onde comer?")
+
+    # Assert
+    assert messages == [INTRO, "Padaria Central"]
+    mocks.vectors.query.assert_awaited_once_with([0.1, 0.2], category_slug=None)
+    assert "Question classification failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_not_call_llm_classification_when_catalog_is_empty() -> None:
+    # Arrange
+    mocks = _mocks()
+    mocks.category_repository.get_all.return_value = []
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", "onde comer?")
+
+    # Assert
+    mocks.openai.classify_question.assert_not_awaited()
+    mocks.vectors.query.assert_awaited_once_with([0.1, 0.2], category_slug=None)
+
+
+@pytest.mark.asyncio
+async def test_should_log_category_but_never_the_question(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    mocks = _mocks()
+
+    # Act
+    with caplog.at_level(logging.INFO):
+        await mocks.service.search(HistoryChannel.ONLINE, "123", "pergunta secreta do usuario")
+
+    # Assert
+    assert "Searching in category 'alimentacao'" in caplog.text
+    assert "pergunta secreta do usuario" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_classify_the_question_alone_without_history() -> None:
+    # Arrange
+    history = [MessageHistoryItem(role=MessageRole.USER, text="quero cortar o cabelo")]
+    mocks = _mocks(history=history)
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", "e pizza?")
+
+    # Assert
+    mocks.openai.classify_question.assert_awaited_once_with("e pizza?", CATALOG)

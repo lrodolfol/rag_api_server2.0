@@ -3,7 +3,9 @@
 Provides the three capabilities the RAG pipeline needs from the language-model
 provider:
 
-* moderating client-submitted content (to stop inappropriate ingestion),
+* moderating client-submitted content (to stop inappropriate ingestion) and
+  classifying it into a knowledge-base category,
+* classifying a user question into one of the knowledge-base categories,
 * generating embeddings (for chunks and for an isolated question),
 * generating a chat answer from the guide, history, question and matches.
 
@@ -42,10 +44,39 @@ _JSON_TEXT_FORMAT: Final[TextFormat] = {"format": {"type": "json_object"}}
 _MODERATION_PROMPT: Final[str] = (
     "Você é um assistente especialista em análise de informações enviadas por "
     "clientes. Dadas as informações abaixo, verifique se há qualquer tipo de "
-    "xingamento ou conteúdo inapropriado.\n"
+    "xingamento ou conteúdo inapropriado e classifique o serviço do cliente em "
+    "uma categoria.\n"
     "Informações do cliente:\n{content}\n\n"
+    "{category_rule}\n\n"
     "Responda exclusivamente em JSON válido, sem texto adicional, no formato: "
-    '{{"insult": true/false, "insult_text": "trecho ofensivo ou vazio"}}'
+    '{{"insult": true/false, "insult_text": "trecho ofensivo ou vazio", '
+    '"categoria": "nome da categoria"}}'
+)
+
+_NEW_CATEGORY_RULE: Final[str] = (
+    "uma única categoria nova, curta, em português e em letras maiúsculas."
+)
+
+_CATEGORY_RULE_WITH_LIST: Final[str] = (
+    "Categorias disponíveis (uma por linha):\n{categories}\n\n"
+    "Escolha exatamente uma categoria da lista acima, escrita exatamente como "
+    "está na lista. Se nenhuma servir, sugira " + _NEW_CATEGORY_RULE
+)
+
+_CATEGORY_RULE_WITHOUT_LIST: Final[str] = (
+    "Sugira para o serviço " + _NEW_CATEGORY_RULE
+)
+
+# The question goes in a separate user message, never inside these instructions.
+_CLASSIFICATION_PROMPT: Final[str] = (
+    "Você é um assistente que classifica perguntas de usuários que procuram "
+    "estabelecimentos, produtos e serviços.\n"
+    "Categorias disponíveis (uma por linha):\n{categories}\n\n"
+    "Escolha exatamente uma categoria da lista acima, a mais relevante para a "
+    "pergunta do usuário, escrita exatamente como está na lista. Se nenhuma "
+    "categoria servir, responda com a categoria vazia.\n"
+    "Responda exclusivamente em JSON válido, sem texto adicional, no formato: "
+    '{{"categoria": "nome da categoria ou vazio"}}'
 )
 
 
@@ -56,13 +87,37 @@ class OpenAIService:
         self._client = client
         self._config = config
 
-    async def moderate(self, content: str) -> ModerationResult:
-        """Check client content for insults/inappropriate text."""
-        logger.info("Sending moderation request to OpenAI")
-        prompt = _MODERATION_PROMPT.format(content=content)
+    async def moderate(self, content: str, categories: list[str]) -> ModerationResult:
+        """Check client content for insults and classify it into a category.
+
+        The LLM picks one of ``categories`` or, when none fits (or the list is
+        empty), suggests a new one. ``category`` is ``""`` when none is returned.
+        """
+        logger.info("Sending moderation request to OpenAI (categories=%d)", len(categories))
+        prompt = _MODERATION_PROMPT.format(
+            content=content, category_rule=self._build_category_rule(categories)
+        )
         raw_answer = await self._create_response([{"role": "system", "content": prompt}])
-        logger.info("OpenAI moderation response received")
-        return self._parse_moderation(raw_answer)
+        result = self._parse_moderation(raw_answer)
+        logger.info("OpenAI moderation response received (category='%s')", result.category)
+        return result
+
+    async def classify_question(self, question: str, categories: list[str]) -> str:
+        """Return the category (from ``categories``) most relevant to ``question``.
+
+        Returns ``""`` when the model finds no suitable category. Raises
+        :class:`OpenIaException` when the provider fails or the answer is not JSON.
+        """
+        logger.info("Sending question classification request to OpenAI (categories=%d)", len(categories))
+        prompt = _CLASSIFICATION_PROMPT.format(categories="\n".join(categories))
+        raw_answer = await self._create_response(
+            [{"role": "system", "content": prompt}, {"role": "user", "content": question}],
+            text_format=_JSON_TEXT_FORMAT,
+        )
+        data = self._load_json_object(raw_answer, "Question classification")
+        category = str(data.get("categoria") or "").strip()
+        logger.info("OpenAI question classification received (category='%s')", category)
+        return category
 
     async def generate_embeddings_from_chunks(
         self, chunks: list[str]
@@ -153,15 +208,30 @@ class OpenAIService:
         ]
 
     def _parse_moderation(self, raw_answer: str) -> ModerationResult:
-        try:
-            data = json.loads(self._strip_code_fence(raw_answer))
-        except (json.JSONDecodeError, TypeError) as error:
-            logger.error("Moderation response was not valid JSON")
-            raise OpenIaException("Invalid moderation response") from error
+        data = self._load_json_object(raw_answer, "Moderation")
         return ModerationResult(
             insult=bool(data.get("insult", False)),
             insult_text=str(data.get("insult_text", "")),
+            category=str(data.get("categoria") or "").strip(),
         )
+
+    def _load_json_object(self, raw_answer: str, operation: str) -> dict[str, Any]:
+        """Parse the model answer as a JSON object or raise :class:`OpenIaException`."""
+        try:
+            data = json.loads(self._strip_code_fence(raw_answer))
+        except (json.JSONDecodeError, TypeError) as error:
+            logger.error("%s response was not valid JSON", operation)
+            raise OpenIaException(f"Invalid {operation.lower()} response") from error
+        if not isinstance(data, dict):
+            logger.error("%s response was not a JSON object", operation)
+            raise OpenIaException(f"Invalid {operation.lower()} response")
+        return data
+
+    @staticmethod
+    def _build_category_rule(categories: list[str]) -> str:
+        if not categories:
+            return _CATEGORY_RULE_WITHOUT_LIST
+        return _CATEGORY_RULE_WITH_LIST.format(categories="\n".join(categories))
 
     @staticmethod
     def _strip_code_fence(raw_answer: str) -> str:

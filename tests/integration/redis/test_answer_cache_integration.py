@@ -1,8 +1,8 @@
 """Integration tests for the Redis answer cache with a fake Redis server.
 
-``fakeredis`` provides an in-memory, protocol-accurate async server so the full
-cache cycle (write, hit with sliding TTL renewal and expiry) is exercised end to
-end through the repository, as in the history integration tests.
+``fakeredis`` provides an in-memory, protocol-accurate async server so the
+expiry of a stored answer is exercised end to end through the repository; the
+write and sliding TTL renewal are covered by the unit tests.
 """
 
 import asyncio
@@ -10,10 +10,8 @@ import asyncio
 import pytest
 from fakeredis import FakeAsyncRedis
 
-from app.domain import ChatAnswer
 from app.infrastructure.redis import (
     ANSWER_CACHE_KEY_PREFIX,
-    ANSWER_CACHE_TTL_SECONDS,
     RedisAnswerCacheRepository,
 )
 
@@ -24,22 +22,6 @@ REDIS_KEY = f"{ANSWER_CACHE_KEY_PREFIX}:{CACHE_KEY}"
 @pytest.fixture
 def client() -> FakeAsyncRedis:
     return FakeAsyncRedis(decode_responses=True)
-
-
-@pytest.mark.asyncio
-async def test_should_store_hit_and_renew_ttl(client: FakeAsyncRedis) -> None:
-    # Arrange
-    repository = RedisAnswerCacheRepository(client)
-
-    # Act
-    await repository.set(CACHE_KEY, "Padaria Central")
-    await client.expire(REDIS_KEY, 30)
-    first_hit = await repository.get(CACHE_KEY)
-    second_hit = await repository.get(CACHE_KEY)
-
-    # Assert
-    assert first_hit == second_hit == "Padaria Central"
-    assert await client.ttl(REDIS_KEY) > ANSWER_CACHE_TTL_SECONDS - 10
 
 
 @pytest.mark.asyncio
@@ -55,18 +37,3 @@ async def test_should_miss_after_key_expires(client: FakeAsyncRedis) -> None:
 
     # Assert
     assert result is None
-
-
-@pytest.mark.asyncio
-async def test_should_round_trip_chat_answer_json(client: FakeAsyncRedis) -> None:
-    # Arrange
-    repository = RedisAnswerCacheRepository(client)
-    answer = ChatAnswer(respostas=["Padaria São João", "Açaí do Zé"])
-
-    # Act
-    await repository.set(CACHE_KEY, answer.to_json())
-    cached = await repository.get(CACHE_KEY)
-
-    # Assert
-    assert cached is not None
-    assert ChatAnswer.from_json(cached) == answer

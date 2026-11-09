@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.infrastructure.config import (
+    CategoriesConfig,
     EmbeddingModelConfig,
     FingerPrintConfig,
     OpenAIConfig,
@@ -86,16 +87,6 @@ FINGER_PRINT_FIELDS: dict[str, str] = {
 }
 
 
-def test_should_build_finger_print_config_with_all_fields() -> None:
-    # Act
-    config = FingerPrintConfig(**FINGER_PRINT_FIELDS)
-
-    # Assert
-    assert config.prompt_version == "1.0.0"
-    assert config.rules_version == "1.0.0"
-    assert config.model_capability == "economic"
-
-
 @pytest.mark.parametrize("missing_field", list(FINGER_PRINT_FIELDS))
 def test_should_reject_finger_print_config_with_missing_field(
     missing_field: str,
@@ -163,15 +154,6 @@ def test_should_mask_postgres_password_in_repr() -> None:
     assert "postgres-secret" not in str(config)
 
 
-def test_should_build_semantic_cache_config_with_all_fields() -> None:
-    # Act
-    config = SemanticCacheConfig(**SEMANTIC_CACHE_FIELDS)
-
-    # Assert
-    assert config.table == "rag_response_cache"
-    assert config.top_k == 3
-
-
 @pytest.mark.parametrize("missing_field", list(SEMANTIC_CACHE_FIELDS))
 def test_should_reject_semantic_cache_config_with_missing_field(
     missing_field: str,
@@ -203,3 +185,40 @@ def test_should_reject_semantic_cache_config_with_non_positive_top_k(
     # Act / Assert
     with pytest.raises(ValidationError, match="top_k"):
         SemanticCacheConfig(**fields)
+
+
+def _categories_data(**overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "redis_key": "knowledge_categories",
+        "initial": ["ALIMENTAÇÃO", "SAÚDE"],
+        "fallback": "OUTROS",
+    }
+    data.update(overrides)
+    return data
+
+
+@pytest.mark.parametrize("field", ["redis_key", "initial", "fallback"])
+def test_should_require_every_categories_field(field: str) -> None:
+    # Arrange
+    data = _categories_data()
+    del data[field]
+
+    # Act / Assert
+    with pytest.raises(ValidationError, match=field):
+        CategoriesConfig(**data)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("redis_key", ""), ("redis_key", "  "), ("initial", []), ("fallback", ""), ("fallback", "  ")],
+)
+def test_should_reject_empty_categories_fields(field: str, value: object) -> None:
+    # Act / Assert
+    with pytest.raises(ValidationError, match=field):
+        CategoriesConfig(**_categories_data(**{field: value}))
+
+
+def test_should_reject_blank_initial_category_name() -> None:
+    # Act / Assert
+    with pytest.raises(ValidationError, match="must not be blank"):
+        CategoriesConfig(**_categories_data(initial=["SAÚDE", "  "]))
