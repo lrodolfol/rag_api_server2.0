@@ -3,7 +3,7 @@
 As tarefas estão ordenadas por dependência: cada uma só começa depois das que ela usa. Cada tarefa é
 uma entrega funcional e incremental, com seus próprios testes.
 
-**Fonte dos requisitos:** `array_response_e_streaming_response.md` (raiz do repositório).
+**Fonte dos requisitos:** `../../meus_prompts/array_response_e_streaming_response.md` (raiz do repositório).
 **Cache exato e semântico existentes:** `tasks/cache/tasks.md`, `tasks/semantic-cache/tasks.md`
 e `tasks/semantic-cache-threshold/tasks.md`.
 **Contexto técnico geral:** `tasks/prd.md` e `tasks/techspec.md`.

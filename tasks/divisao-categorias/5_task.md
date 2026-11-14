@@ -1,6 +1,6 @@
 # Tarefa 5.0: Integração da categoria no cadastro (`RegistrationService`)
 
-<critical>Ler os arquivos `divisao_em_categorias.md` (raiz), `tasks/divisao-categorias/tasks.md`, `tasks/prd.md` e `tasks/techspec.md`, se você não ler esses arquivos sua tarefa será invalidada</critical>
+<critical>Ler os arquivos `../../meus_prompts/divisao_em_categorias.md` (raiz), `tasks/divisao-categorias/tasks.md`, `tasks/prd.md` e `tasks/techspec.md`, se você não ler esses arquivos sua tarefa será invalidada</critical>
 
 ## Visão Geral
 

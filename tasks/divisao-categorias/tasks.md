@@ -3,7 +3,7 @@
 As tarefas estão ordenadas por dependência: cada uma só começa depois das que ela usa. Cada tarefa é
 uma entrega funcional e incremental, com seus próprios testes.
 
-**Fonte dos requisitos:** `divisao_em_categorias.md` (raiz do repositório).
+**Fonte dos requisitos:** `../../meus_prompts/divisao_em_categorias.md` (raiz do repositório).
 **Fluxos atuais de cadastro, exclusão e busca:** `tasks/delete-service/tasks.md`,
 `tasks/streaming-response/tasks.md` e `tasks/mensagem-curta/tasks.md`.
 **Contexto técnico geral:** `tasks/prd.md` e `tasks/techspec.md`.
@@ -18,7 +18,7 @@ Os arquivos de tarefa só referenciam esses documentos e não repetem a implemen
   - O **nome** é o que fica no Redis e o que é mostrado à LLM.
   - O **slug** é o que vai no nome do arquivo do bucket e no metadado `category` do Pinecone.
   - Duas categorias são a mesma quando têm o mesmo slug (`"Alimentação"` = `"ALIMENTACAO"`).
-- **Lista inicial:** as 20 categorias de `divisao_em_categorias.md` ficam no arquivo de
+- **Lista inicial:** as 20 categorias de `../../meus_prompts/divisao_em_categorias.md` ficam no arquivo de
   configuração (`env.json` e `env.example.json`), nunca fixas no código.
 - **Redis:** as categorias ficam num **SET** do Redis (o nome da chave também vem da configuração).
   A lista inicial é carregada no startup da aplicação (`lifespan`) com `SADD`, que é idempotente:

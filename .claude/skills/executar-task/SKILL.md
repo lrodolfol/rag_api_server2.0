@@ -46,9 +46,6 @@ description: Implements feature tasks by loading required skills, reading PRD/Te
 **Step 6: Mark Task Complete (Mandatory)**
 1. After successful implementation and tests, mark the task as complete in `tasks.md`.
 
-**Step 7: Review (Mandatory)**
-2. Address any issues identified by the reviewer.
-3. Do not finalize the task until review issues are resolved.
 
 ## Error Handling
 - If the task file does not exist, halt and report to the user.

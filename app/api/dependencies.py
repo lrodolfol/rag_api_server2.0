@@ -111,6 +111,8 @@ def get_registration_service() -> RegistrationService:
         vector_repository=_vector_repository(),
         storage_repository=_storage_repository(),
         category_service=_category_service(),
+        semantic_cache=_semantic_cache_service(),
+        answer_cache=_answer_cache_repository(),
     )
 
 
@@ -119,6 +121,8 @@ def get_deletion_service() -> DeletionService:
     return DeletionService(
         vector_repository=_vector_repository(),
         storage_repository=_storage_repository(),
+        semantic_cache=_semantic_cache_service(),
+        answer_cache=_answer_cache_repository(),
     )
 
 

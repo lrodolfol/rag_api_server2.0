@@ -1,6 +1,6 @@
 # Tarefa 4.0: Rotas `/chat` e `/whatsapp` com `StreamingResponse`
 
-<critical>Ler os arquivos `array_response_e_streaming_response.md` (raiz), `tasks/streaming-response/tasks.md`, `tasks/prd.md` e `tasks/techspec.md`, se você não ler esses arquivos sua tarefa será invalidada</critical>
+<critical>Ler os arquivos `../../meus_prompts/array_response_e_streaming_response.md` (raiz), `tasks/streaming-response/tasks.md`, `tasks/prd.md` e `tasks/techspec.md`, se você não ler esses arquivos sua tarefa será invalidada</critical>
 
 ## Visão Geral
 
@@ -57,7 +57,7 @@ Depende da tarefa 3.0 (`SearchService.search` devolvendo `list[str]`).
 
 As regras estão em `tasks/streaming-response/tasks.md`, nos itens "Streaming (SSE)" e
 "Ordem do fluxo". Veja o exemplo de `StreamingResponse` no documento
-`array_response_e_streaming_response.md`.
+`../../meus_prompts/array_response_e_streaming_response.md`.
 
 Pontos de atenção:
 

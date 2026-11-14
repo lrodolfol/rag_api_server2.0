@@ -7,18 +7,30 @@ service (catalog seeded by the app lifespan on an in-memory Redis) with fake
 OpenAI, vector and storage boundaries.
 """
 
+import asyncio
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
+import psycopg
 import pytest
 from fakeredis import FakeAsyncRedis
 from fastapi.testclient import TestClient
+from redis.exceptions import RedisError
 
 from app.api.dependencies import get_category_service, get_registration_service
+from app.application.cache import SemanticCacheService
 from app.application.categories import CategoryService
 from app.application.registration import RegistrationService
 from app.domain import CompanyRegistrationRequest, EmbeddingRecord
-from app.infrastructure.config import CategoriesConfig
+from app.infrastructure.config import CategoriesConfig, PostgresConfig, SemanticCacheConfig
 from app.infrastructure.openai import ModerationResult
-from app.infrastructure.redis import RedisCategoryRepository
+from app.infrastructure.postgres import PostgresSemanticCacheRepository
+from app.infrastructure.redis import RedisAnswerCacheRepository, RedisCategoryRepository
 from app.main import create_app
+
+FOOD_KEY = "f" * 64
+BEAUTY_KEY = "e" * 64
+UNCATEGORIZED_KEY = "c" * 64
 
 
 class _FakeRegistrationService:
@@ -43,6 +55,40 @@ def _payload(user_code: str = "123", name: str = "Padaria") -> dict:
             "detalhes": "detalhes",
         },
     }
+
+
+def _semantic_cache() -> SemanticCacheService:
+    postgres = PostgresConfig(
+        host="localhost", port=5432, database="rag_auth", user="postgres", password="pw"
+    )
+    return SemanticCacheService(
+        PostgresSemanticCacheRepository(postgres, SemanticCacheConfig(table="rag_response_cache", top_k=3))
+    )
+
+
+def _answer_cache(redis_client: Any = None) -> RedisAnswerCacheRepository:
+    """Real exact-cache repository over an in-memory (or given) Redis client."""
+    return RedisAnswerCacheRepository(redis_client or FakeAsyncRedis(decode_responses=True))
+
+
+def _seeded_answer_cache() -> RedisAnswerCacheRepository:
+    """Exact cache holding one answer in ``alimentacao``, one in ``beleza`` and one uncategorized."""
+    answer_cache = _answer_cache()
+
+    async def _seed() -> None:
+        await answer_cache.set(FOOD_KEY, "Padaria", {"alimentacao"})
+        await answer_cache.set(BEAUTY_KEY, "Salao", {"beleza"})
+        await answer_cache.set(UNCATEGORIZED_KEY, "Padaria e Salao", {None})
+
+    asyncio.run(_seed())
+    return answer_cache
+
+
+def _failing_redis() -> MagicMock:
+    """Redis client whose every invalidation read fails, like an unreachable server."""
+    client = MagicMock()
+    client.smembers = AsyncMock(side_effect=RedisError("redis down"))
+    return client
 
 
 def _client(service: _FakeRegistrationService) -> TestClient:
@@ -136,7 +182,7 @@ class _RecordingStorage:
     [("ALIMENTAÇÃO", "alimentacao"), ("Serviços Profissionais", "servicos_profissionais")],
 )
 def test_should_pass_category_slug_to_vectors_and_storage(
-    llm_category: str, expected_slug: str
+    llm_category: str, expected_slug: str, semantic_cache_db: Any
 ) -> None:
     # Arrange
     config = CategoriesConfig(
@@ -154,6 +200,8 @@ def test_should_pass_category_slug_to_vectors_and_storage(
         vector_repository=vectors,
         storage_repository=storage,
         category_service=categories,
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(),
     )
     app = create_app()
     app.dependency_overrides[get_registration_service] = lambda: service
@@ -168,3 +216,97 @@ def test_should_pass_category_slug_to_vectors_and_storage(
     assert openai.offered_categories == [["ALIMENTAÇÃO", "SERVIÇOS PROFISSIONAIS"]]
     assert vectors.upserted_slugs == [expected_slug]
     assert storage.saved_slugs == [expected_slug]
+
+
+def _real_registration_client(
+    openai: _CategorizingOpenAI,
+    vectors: _RecordingVectors,
+    answer_cache: RedisAnswerCacheRepository | None = None,
+) -> TestClient:
+    config = CategoriesConfig(
+        redis_key="knowledge_categories", initial=["ALIMENTAÇÃO", "BELEZA"], fallback="OUTROS"
+    )
+    categories = CategoryService(RedisCategoryRepository(FakeAsyncRedis(decode_responses=True), config), config)
+    service = RegistrationService(
+        openai_service=openai,
+        vector_repository=vectors,
+        storage_repository=_RecordingStorage(),
+        category_service=categories,
+        semantic_cache=_semantic_cache(),
+        answer_cache=answer_cache or _answer_cache(),
+    )
+    app = create_app()
+    app.dependency_overrides[get_registration_service] = lambda: service
+    app.dependency_overrides[get_category_service] = lambda: categories
+    return TestClient(app)
+
+
+def test_should_invalidate_registered_category_and_uncategorized_cache_rows(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    semantic_cache_db.rows = [{"category": slug} for slug in ("alimentacao", "beleza", None)]
+    client = _real_registration_client(_CategorizingOpenAI("ALIMENTAÇÃO"), _RecordingVectors())
+
+    # Act
+    with client:
+        response = client.post("/companies", json=_payload())
+
+    # Assert
+    assert response.status_code == 201
+    assert [row["category"] for row in semantic_cache_db.rows] == ["beleza"]
+
+
+def test_should_register_company_even_when_cache_invalidation_fails(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    semantic_cache_db.error = psycopg.OperationalError("db down")
+    vectors = _RecordingVectors()
+    client = _real_registration_client(_CategorizingOpenAI("ALIMENTAÇÃO"), vectors)
+
+    # Act
+    with client:
+        response = client.post("/companies", json=_payload())
+
+    # Assert
+    assert response.status_code == 201
+    assert vectors.upserted_slugs == ["alimentacao"]
+
+
+def test_should_invalidate_registered_category_and_uncategorized_exact_cache_answers(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    answer_cache = _seeded_answer_cache()
+    client = _real_registration_client(
+        _CategorizingOpenAI("ALIMENTAÇÃO"), _RecordingVectors(), answer_cache
+    )
+
+    # Act
+    with client:
+        response = client.post("/companies", json=_payload())
+
+    # Assert
+    assert response.status_code == 201
+    assert asyncio.run(answer_cache.get(FOOD_KEY)) is None
+    assert asyncio.run(answer_cache.get(UNCATEGORIZED_KEY)) is None
+    assert asyncio.run(answer_cache.get(BEAUTY_KEY)) == "Salao"
+
+
+def test_should_register_company_even_when_redis_invalidation_fails(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    vectors = _RecordingVectors()
+    client = _real_registration_client(
+        _CategorizingOpenAI("ALIMENTAÇÃO"), vectors, _answer_cache(_failing_redis())
+    )
+
+    # Act
+    with client:
+        response = client.post("/companies", json=_payload())
+
+    # Assert
+    assert response.status_code == 201
+    assert vectors.upserted_slugs == ["alimentacao"]

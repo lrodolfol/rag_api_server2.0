@@ -38,6 +38,10 @@ class FakeCursor:
     def __init__(self, connection: "FakeConnection") -> None:
         self._connection = connection
 
+    @property
+    def rowcount(self) -> int:
+        return self._connection.rowcount
+
     async def __aenter__(self) -> Self:
         return self
 
@@ -54,8 +58,9 @@ class FakeCursor:
 class FakeConnection:
     """Async connection double; ``error`` is raised on execute when set."""
 
-    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
+    def __init__(self, rows: list[dict[str, Any]] | None = None, rowcount: int = 0) -> None:
         self.rows = rows or []
+        self.rowcount = rowcount
         self.error: psycopg.Error | None = None
         self.executed: list[tuple[Any, dict[str, Any]]] = []
 
@@ -68,10 +73,11 @@ class FakeConnection:
     def cursor(self, row_factory: Any = None) -> FakeCursor:
         return FakeCursor(self)
 
-    async def execute(self, query: Any, params: dict[str, Any]) -> None:
+    async def execute(self, query: Any, params: dict[str, Any]) -> FakeCursor:
         if self.error is not None:
             raise self.error
         self.executed.append((query, params))
+        return FakeCursor(self)
 
 
 def _patch_connection(
@@ -87,7 +93,7 @@ def _repository() -> PostgresSemanticCacheRepository:
     return PostgresSemanticCacheRepository(POSTGRES_CONFIG, SEMANTIC_CACHE_CONFIG)
 
 
-def _entry() -> SemanticCacheEntry:
+def _entry(category: str | None = None) -> SemanticCacheEntry:
     return SemanticCacheEntry(
         id=ENTRY_ID,
         fingerprint=FINGERPRINT,
@@ -95,15 +101,19 @@ def _entry() -> SemanticCacheEntry:
         response=ANSWER,
         embedding=EMBEDDING,
         created_at=CREATED_AT,
+        category=category,
     )
 
 
-def _row(input_text: str, response: str, distance: float) -> dict[str, Any]:
+def _row(
+    input_text: str, response: str, distance: float, category: str | None = None
+) -> dict[str, Any]:
     return {
         "input_text": input_text,
         "response_json": response,
         "distance": distance,
         "similarity": 1 - distance,
+        "category": category,
     }
 
 
@@ -142,7 +152,10 @@ async def test_should_map_rows_to_matches_in_received_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Arrange
-    rows = [_row("pergunta a", "resposta a", 0.1), _row("pergunta b", "resposta b", 0.4)]
+    rows = [
+        _row("pergunta a", "resposta a", 0.1, category="alimentacao"),
+        _row("pergunta b", "resposta b", 0.4),
+    ]
     _patch_connection(monkeypatch, FakeConnection(rows))
 
     # Act
@@ -151,12 +164,32 @@ async def test_should_map_rows_to_matches_in_received_order(
     # Assert
     assert matches == [
         SemanticCacheMatch(
-            input_text="pergunta a", response="resposta a", distance=0.1, similarity=0.9
+            input_text="pergunta a",
+            response="resposta a",
+            distance=0.1,
+            similarity=0.9,
+            category="alimentacao",
         ),
         SemanticCacheMatch(
             input_text="pergunta b", response="resposta b", distance=0.4, similarity=0.6
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_should_select_category_column_in_nearest_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    connection = FakeConnection()
+    _patch_connection(monkeypatch, connection)
+
+    # Act
+    await _repository().find_nearest(EMBEDDING, FINGERPRINT)
+
+    # Assert
+    query, _ = connection.executed[0]
+    assert "c.category" in query.as_string(None)
 
 
 @pytest.mark.asyncio
@@ -205,10 +238,10 @@ async def test_should_save_every_column_with_response_as_json_string(
     _patch_connection(monkeypatch, connection)
 
     # Act
-    await _repository().save(_entry())
+    await _repository().save(_entry(category="alimentacao"))
 
     # Assert
-    _, params = connection.executed[0]
+    query, params = connection.executed[0]
     assert params == {
         "id": ENTRY_ID,
         "prompt_version": "1.0.0",
@@ -219,8 +252,26 @@ async def test_should_save_every_column_with_response_as_json_string(
         "response_json": json.dumps(ANSWER),
         "embedding": "[0.1,0.2,-0.3]",
         "created_at": CREATED_AT,
+        "category": "alimentacao",
     }
     assert json.loads(params["response_json"]) == ANSWER
+    assert "%(category)s" in query.as_string(None)
+
+
+@pytest.mark.asyncio
+async def test_should_save_null_category_when_entry_has_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    connection = FakeConnection()
+    _patch_connection(monkeypatch, connection)
+
+    # Act
+    await _repository().save(_entry())
+
+    # Assert
+    _, params = connection.executed[0]
+    assert params["category"] is None
 
 
 @pytest.mark.asyncio
@@ -257,3 +308,123 @@ async def test_should_not_log_question_answer_or_embedding(
     assert caplog.records
     for sensitive in (QUESTION, ANSWER, FINGERPRINT.normalized_text, "0.1,0.2"):
         assert sensitive not in caplog.text
+
+
+# --- delete_by_category ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_should_delete_category_with_single_parameterized_statement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    connection = FakeConnection(rowcount=2)
+    _patch_connection(monkeypatch, connection)
+
+    # Act
+    await _repository().delete_by_category("alimentacao")
+
+    # Assert
+    assert len(connection.executed) == 1
+    query, params = connection.executed[0]
+    statement = query.as_string(None)
+    assert statement.lstrip().startswith("DELETE FROM")
+    assert '"rag_response_cache"' in statement
+    assert "category IS NULL OR category = %(category)s" in statement
+    assert params == {"category": "alimentacao"}
+
+
+@pytest.mark.asyncio
+async def test_should_send_none_category_to_delete_only_uncategorized_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    connection = FakeConnection()
+    _patch_connection(monkeypatch, connection)
+
+    # Act
+    await _repository().delete_by_category(None)
+
+    # Assert
+    _, params = connection.executed[0]
+    assert params == {"category": None}
+
+
+@pytest.mark.asyncio
+async def test_should_log_category_and_deleted_count_on_invalidation(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange
+    _patch_connection(monkeypatch, FakeConnection(rowcount=3))
+
+    # Act
+    with caplog.at_level(logging.INFO):
+        await _repository().delete_by_category("beleza")
+
+    # Assert
+    assert "Semantic cache invalidated (category='beleza', entries=3)" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_log_none_when_invalidating_without_category(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange
+    _patch_connection(monkeypatch, FakeConnection(rowcount=1))
+
+    # Act
+    with caplog.at_level(logging.INFO):
+        await _repository().delete_by_category(None)
+
+    # Assert
+    assert "Semantic cache invalidated (category='none', entries=1)" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_only_log_when_delete_connection_fails(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange
+    async def _failing_open(_: PostgresConfig) -> FakeConnection:
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(module, "open_postgres_connection", _failing_open)
+
+    # Act
+    with caplog.at_level(logging.ERROR):
+        await _repository().delete_by_category("alimentacao")
+
+    # Assert
+    assert "Failed to invalidate semantic cache (category='alimentacao')" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_only_log_when_delete_statement_fails(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange
+    connection = FakeConnection()
+    connection.error = psycopg.errors.UndefinedColumn("column category does not exist")
+    _patch_connection(monkeypatch, connection)
+
+    # Act
+    with caplog.at_level(logging.ERROR):
+        await _repository().delete_by_category("alimentacao")
+
+    # Assert
+    assert "Failed to invalidate semantic cache (category='alimentacao')" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_log_unknown_count_when_server_reports_no_rowcount(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange
+    _patch_connection(monkeypatch, FakeConnection(rowcount=-1))
+
+    # Act
+    with caplog.at_level(logging.INFO):
+        await _repository().delete_by_category("beleza")
+
+    # Assert
+    assert "Semantic cache invalidated (category='beleza', entries=unknown)" in caplog.text
