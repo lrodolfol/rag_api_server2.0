@@ -1,6 +1,6 @@
 # Tarefa 3.0: `SearchService` com resposta em array e caches em JSON
 
-<critical>Ler os arquivos `array_response_e_streaming_response.md` (raiz), `tasks/streaming-response/tasks.md`, `tasks/prd.md` e `tasks/techspec.md`, se você não ler esses arquivos sua tarefa será invalidada</critical>
+<critical>Ler os arquivos `../../meus_prompts/array_response_e_streaming_response.md` (raiz), `tasks/streaming-response/tasks.md`, `tasks/prd.md` e `tasks/techspec.md`, se você não ler esses arquivos sua tarefa será invalidada</critical>
 
 ## Visão Geral
 

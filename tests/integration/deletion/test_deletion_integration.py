@@ -9,23 +9,37 @@ exercised end to end.
 import io
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from botocore.exceptions import ClientError
+from fakeredis import FakeAsyncRedis
 from pydantic import SecretStr
 
+from app.application.cache import SemanticCacheService
 from app.application.deletion import DeletionService
 from app.domain import (
     CompanyDeletionRequest,
     CompanyRegistrationRequest,
     EmbeddingRecord,
 )
-from app.infrastructure.config import BucketConfig, PineconeConfig
+from app.infrastructure.config import (
+    BucketConfig,
+    PineconeConfig,
+    PostgresConfig,
+    SemanticCacheConfig,
+)
 from app.infrastructure.pinecone import PineconeVectorRepository
+from app.infrastructure.postgres import PostgresSemanticCacheRepository
+from app.infrastructure.redis import RedisAnswerCacheRepository
 from app.infrastructure.storage import (
     CLIENT_RECORDS_OBJECT_KEY_TEMPLATE,
     ClientStorageRepository,
 )
+
+FOOD_KEY = "f" * 64
+BEAUTY_KEY = "e" * 64
+UNCATEGORIZED_KEY = "c" * 64
 
 
 class _FakeIndex:
@@ -117,6 +131,7 @@ def _registration(user_code: str) -> CompanyRegistrationRequest:
 
 async def _build(
     *clients: tuple[str, str],
+    answer_cache: RedisAnswerCacheRepository | None = None,
 ) -> tuple[DeletionService, PineconeVectorRepository, _FakeS3Client]:
     """Register each ``(user_code, category_slug)`` in the vectors and storage."""
     s3 = _FakeS3Client()
@@ -126,7 +141,27 @@ async def _build(
         embeddings = [EmbeddingRecord(text="padaria", vector=[1.0, 0.0])]
         await vectors.upsert_company_vectors("Padaria", user_code, category_slug, embeddings)
         await storage.save_client(_registration(user_code), category_slug)
-    return DeletionService(vectors, storage), vectors, s3
+    postgres = PostgresConfig(
+        host="localhost", port=5432, database="rag_auth", user="postgres", password="pw"
+    )
+    cache = SemanticCacheService(
+        PostgresSemanticCacheRepository(
+            postgres, SemanticCacheConfig(table="rag_response_cache", top_k=3)
+        )
+    )
+    exact_cache = answer_cache or RedisAnswerCacheRepository(
+        FakeAsyncRedis(decode_responses=True)
+    )
+    return DeletionService(vectors, storage, cache, exact_cache), vectors, s3
+
+
+async def _seeded_answer_cache() -> RedisAnswerCacheRepository:
+    """Exact cache holding one answer in ``beleza``, one in ``alimentacao`` and one uncategorized."""
+    answer_cache = RedisAnswerCacheRepository(FakeAsyncRedis(decode_responses=True))
+    await answer_cache.set(BEAUTY_KEY, "Salao", {"beleza"})
+    await answer_cache.set(FOOD_KEY, "Padaria", {"alimentacao"})
+    await answer_cache.set(UNCATEGORIZED_KEY, "Padaria e Salao", {None})
+    return answer_cache
 
 
 def _stored_user_codes(s3: _FakeS3Client, category_slug: str = "alimentacao") -> list[str]:
@@ -197,3 +232,88 @@ async def test_should_delete_legacy_vectors_without_touching_storage(
     assert await vectors.has_vectors_for_user_code("789") is False
     assert s3.store == objects_before
     assert "legacy record was not removed from the bucket" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_deleted_client_category_and_uncategorized_cache_rows(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    service, _, _ = await _build(("123", "beleza"), ("456", "alimentacao"))
+    semantic_cache_db.rows = [{"category": slug} for slug in ("beleza", "alimentacao", None)]
+
+    # Act
+    await service.delete(CompanyDeletionRequest(user_code="123"))
+
+    # Assert
+    assert [row["category"] for row in semantic_cache_db.rows] == ["alimentacao"]
+
+
+@pytest.mark.asyncio
+async def test_should_not_invalidate_cache_when_client_has_no_vectors(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    service, _, _ = await _build(("456", "alimentacao"))
+    semantic_cache_db.rows = [{"category": slug} for slug in ("alimentacao", None)]
+
+    # Act
+    await service.delete(CompanyDeletionRequest(user_code="123"))
+
+    # Assert
+    assert len(semantic_cache_db.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_deleted_client_category_and_uncategorized_exact_answers(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    answer_cache = await _seeded_answer_cache()
+    service, _, _ = await _build(
+        ("123", "beleza"), ("456", "alimentacao"), answer_cache=answer_cache
+    )
+
+    # Act
+    await service.delete(CompanyDeletionRequest(user_code="123"))
+
+    # Assert
+    assert await answer_cache.get(BEAUTY_KEY) is None
+    assert await answer_cache.get(UNCATEGORIZED_KEY) is None
+    assert await answer_cache.get(FOOD_KEY) == "Padaria"
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_only_uncategorized_exact_answers_for_legacy_client(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange: vectors stored before categories existed (no ``category`` metadata).
+    answer_cache = await _seeded_answer_cache()
+    service, vectors, _ = await _build(answer_cache=answer_cache)
+    index = vectors._client.Index("any")
+    index.upsert(vectors=[("old-789-0", [1.0, 0.0], {"text": "a", "user_code": "789"})])
+
+    # Act
+    await service.delete(CompanyDeletionRequest(user_code="789"))
+
+    # Assert
+    assert await answer_cache.get(UNCATEGORIZED_KEY) is None
+    assert await answer_cache.get(BEAUTY_KEY) == "Salao"
+    assert await answer_cache.get(FOOD_KEY) == "Padaria"
+
+
+@pytest.mark.asyncio
+async def test_should_not_invalidate_exact_answers_when_client_has_no_vectors(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    answer_cache = await _seeded_answer_cache()
+    service, _, _ = await _build(("456", "alimentacao"), answer_cache=answer_cache)
+
+    # Act
+    await service.delete(CompanyDeletionRequest(user_code="123"))
+
+    # Assert
+    assert await answer_cache.get(BEAUTY_KEY) == "Salao"
+    assert await answer_cache.get(FOOD_KEY) == "Padaria"
+    assert await answer_cache.get(UNCATEGORIZED_KEY) == "Padaria e Salao"

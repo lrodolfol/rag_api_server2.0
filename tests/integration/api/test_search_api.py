@@ -44,6 +44,8 @@ from app.infrastructure.postgres import PostgresSemanticCacheRepository
 from app.infrastructure.pinecone import VectorMatch
 from app.infrastructure.rate_limit import InMemoryRateLimiter
 from app.infrastructure.redis import (
+    ANSWER_CACHE_CATEGORY_PREFIX,
+    ANSWER_CACHE_KEY_PREFIX,
     HistoryChannel,
     RedisAnswerCacheRepository,
     RedisCategoryRepository,
@@ -347,15 +349,22 @@ def test_should_store_answer_in_both_caches_on_semantic_miss(
     # Act
     with pipeline.client() as client:
         messages = _post_question(client, endpoint, RAW_QUESTION)
-        redis_keys = client.portal.call(pipeline.redis.keys, "*")
-        redis_value = client.portal.call(pipeline.redis.get, redis_keys[0])
+        redis_keys = client.portal.call(pipeline.redis.keys, f"{ANSWER_CACHE_KEY_PREFIX}:*")
+        answer_keys = [
+            key for key in redis_keys if not key.startswith(ANSWER_CACHE_CATEGORY_PREFIX)
+        ]
+        redis_value = client.portal.call(pipeline.redis.get, answer_keys[0])
+        indexed = client.portal.call(
+            pipeline.redis.smembers, f"{ANSWER_CACHE_CATEGORY_PREFIX}:alimentacao"
+        )
 
     # Assert
     expected_json = ChatAnswer(respostas=["Marmitaria Central"]).to_json()
     assert messages == [INTRO, "Marmitaria Central"]
     pipeline.openai.generate_chat_answer.assert_awaited_once()
-    assert len(redis_keys) == 1
+    assert len(answer_keys) == 1
     assert redis_value == expected_json
+    assert {f"{ANSWER_CACHE_KEY_PREFIX}:{member}" for member in indexed} == set(answer_keys)
     assert len(semantic_cache_db.rows) == 1
     row = semantic_cache_db.rows[0]
     assert json.loads(row["response_json"]) == expected_json

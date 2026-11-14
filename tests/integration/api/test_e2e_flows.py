@@ -52,8 +52,10 @@ from app.infrastructure.pinecone import VectorMatch
 from app.infrastructure.postgres import PostgresSemanticCacheRepository
 from app.infrastructure.rate_limit import InMemoryRateLimiter
 from app.infrastructure.redis import (
+    ANSWER_CACHE_CATEGORY_PREFIX,
     ANSWER_CACHE_KEY_PREFIX,
     ANSWER_CACHE_TTL_SECONDS,
+    UNCATEGORIZED_SLUG,
     HistoryChannel,
     RedisAnswerCacheRepository,
     RedisCategoryRepository,
@@ -233,6 +235,18 @@ POSTGRES_CONFIG = PostgresConfig(
 SEMANTIC_CACHE_CONFIG = SemanticCacheConfig(table="rag_response_cache", top_k=3)
 
 
+def _semantic_cache() -> SemanticCacheService:
+    """Real semantic cache service over the in-memory ``semantic_cache_db`` fixture."""
+    return SemanticCacheService(
+        PostgresSemanticCacheRepository(POSTGRES_CONFIG, SEMANTIC_CACHE_CONFIG)
+    )
+
+
+def _answer_cache(redis_client: FakeAsyncRedis | None = None) -> RedisAnswerCacheRepository:
+    """Real exact-cache repository over an in-memory (or the given) Redis client."""
+    return RedisAnswerCacheRepository(redis_client or FakeAsyncRedis(decode_responses=True))
+
+
 def _search_service(
     openai: _FakeOpenAIService,
     vectors: _FakeVectorRepository,
@@ -251,9 +265,7 @@ def _search_service(
         vector_repository=vectors,
         history_repository=history,
         answer_cache=RedisAnswerCacheRepository(client),
-        semantic_cache=SemanticCacheService(
-            PostgresSemanticCacheRepository(POSTGRES_CONFIG, SEMANTIC_CACHE_CONFIG)
-        ),
+        semantic_cache=_semantic_cache(),
         fingerprint_config=FINGER_PRINT,
         category_service=category_service or _category_service(),
     )
@@ -276,7 +288,7 @@ def _registration_payload(user_code: str = "123", name: str = "Padaria") -> dict
 # --- Registration flow -------------------------------------------------------
 
 
-def test_e2e_should_register_company_through_real_service() -> None:
+def test_e2e_should_register_company_through_real_service(semantic_cache_db: Any) -> None:
     # Arrange: real RegistrationService wired to fake external deps.
     openai = _FakeOpenAIService()
     vectors = _FakeVectorRepository()
@@ -286,6 +298,8 @@ def test_e2e_should_register_company_through_real_service() -> None:
         vector_repository=vectors,
         storage_repository=storage,
         category_service=_category_service(),
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(),
     )
     app = create_app()
     app.dependency_overrides[get_registration_service] = lambda: service
@@ -303,7 +317,7 @@ def test_e2e_should_register_company_through_real_service() -> None:
     assert [item.user_code for item in storage.objects["alimentacao"]] == ["123"]
 
 
-def test_e2e_should_move_client_to_new_category_on_registration_update() -> None:
+def test_e2e_should_move_client_to_new_category_on_registration_update(semantic_cache_db: Any) -> None:
     # Arrange: the client first registers a restaurant, then a beauty salon.
     openai = _FakeOpenAIService(category="ALIMENTAÇÃO")
     vectors = _FakeVectorRepository()
@@ -314,11 +328,14 @@ def test_e2e_should_move_client_to_new_category_on_registration_update() -> None
         vector_repository=vectors,
         storage_repository=storage,
         category_service=categories,
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(),
     )
     app = create_app()
     app.dependency_overrides[get_registration_service] = lambda: service
     client = TestClient(app)
     client.post("/companies", json=_registration_payload("123"))
+    semantic_cache_db.rows = [{"category": slug} for slug in ("alimentacao", "pet_shop", "beleza", None)]
     openai.category = "Pet Shop"
 
     # Act
@@ -330,9 +347,11 @@ def test_e2e_should_move_client_to_new_category_on_registration_update() -> None
     assert storage.objects["alimentacao"] == []
     assert [item.user_code for item in storage.objects["pet_shop"]] == ["123"]
     assert "PET SHOP" in asyncio.run(categories.list_names())
+    # Both the old and the new category were invalidated (plus the uncategorized rows).
+    assert [row["category"] for row in semantic_cache_db.rows] == ["beleza"]
 
 
-def test_e2e_should_reject_inappropriate_registration_without_persisting() -> None:
+def test_e2e_should_reject_inappropriate_registration_without_persisting(semantic_cache_db: Any) -> None:
     # Arrange: moderation flags the content as inappropriate.
     openai = _FakeOpenAIService(insult=True)
     vectors = _FakeVectorRepository()
@@ -342,6 +361,8 @@ def test_e2e_should_reject_inappropriate_registration_without_persisting() -> No
         vector_repository=vectors,
         storage_repository=storage,
         category_service=_category_service(),
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(),
     )
     app = create_app()
     app.dependency_overrides[get_registration_service] = lambda: service
@@ -360,7 +381,7 @@ def test_e2e_should_reject_inappropriate_registration_without_persisting() -> No
 # --- Deletion flow -----------------------------------------------------------
 
 
-def test_e2e_should_register_then_delete_company_through_real_services() -> None:
+def test_e2e_should_register_then_delete_company_through_real_services(semantic_cache_db: Any) -> None:
     # Arrange: real registration and deletion services sharing fake external deps.
     openai = _FakeOpenAIService(category="ALIMENTAÇÃO")
     vectors = _FakeVectorRepository()
@@ -370,8 +391,15 @@ def test_e2e_should_register_then_delete_company_through_real_services() -> None
         vector_repository=vectors,
         storage_repository=storage,
         category_service=_category_service(),
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(),
     )
-    deletion = DeletionService(vector_repository=vectors, storage_repository=storage)
+    deletion = DeletionService(
+        vector_repository=vectors,
+        storage_repository=storage,
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(),
+    )
     app = create_app()
     app.dependency_overrides[get_registration_service] = lambda: registration
     app.dependency_overrides[get_deletion_service] = lambda: deletion
@@ -465,6 +493,8 @@ def test_e2e_should_search_only_in_the_category_of_the_question(semantic_cache_d
         vector_repository=vectors,
         storage_repository=_FakeStorageRepository(),
         category_service=categories,
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(),
     )
     search = _search_service(openai, vectors, _FakeHistoryRepository(), None, categories)
     app = create_app()
@@ -487,6 +517,53 @@ def test_e2e_should_search_only_in_the_category_of_the_question(semantic_cache_d
     assert vectors.queried_categories == ["alimentacao"]
     phrases = openai.chat_phrases[0]
     assert phrases and all("Padaria Central" in phrase for phrase in phrases)
+
+
+def _chat_once(service: SearchService) -> None:
+    app = create_app()
+    app.dependency_overrides[get_search_service] = lambda: service
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
+    TestClient(app).post(
+        "/chat", json={"message": "onde comer?", "user_code": "1", "user_ip": "200.0.0.9"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_e2e_should_store_question_category_slug_in_semantic_cache(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    openai = _FakeOpenAIService(category="ALIMENTAÇÃO")
+    categories = _category_service()
+    await categories.seed_initial()
+    service = _search_service(
+        openai, _FakeVectorRepository(), _FakeHistoryRepository(), None, categories
+    )
+
+    # Act
+    _chat_once(service)
+
+    # Assert
+    assert [row["category"] for row in semantic_cache_db.rows] == ["alimentacao"]
+
+
+@pytest.mark.asyncio
+async def test_e2e_should_store_null_category_when_search_runs_without_filter(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange: the model answers with a category that is not in the catalog.
+    openai = _FakeOpenAIService(category="INEXISTENTE")
+    categories = _category_service()
+    await categories.seed_initial()
+    service = _search_service(
+        openai, _FakeVectorRepository(), _FakeHistoryRepository(), None, categories
+    )
+
+    # Act
+    _chat_once(service)
+
+    # Assert
+    assert [row["category"] for row in semantic_cache_db.rows] == [None]
 
 
 # --- Global error handling (safe, standardized responses) --------------------
@@ -548,6 +625,25 @@ def _online_chat_body(message: str, user_code: str = "4567895465") -> dict:
     return {"message": message, "user_code": user_code, "user_ip": "200.148.12.188"}
 
 
+def _answer_keys(client: TestClient, redis_client: FakeAsyncRedis) -> list[str]:
+    """Redis keys of the cached answers, without the category index SETs."""
+    keys = client.portal.call(redis_client.keys, f"{ANSWER_CACHE_KEY_PREFIX}:*")
+    return [key for key in keys if not key.startswith(ANSWER_CACHE_CATEGORY_PREFIX)]
+
+
+def _indexed_answer_keys(
+    client: TestClient, redis_client: FakeAsyncRedis
+) -> dict[str | None, set[str]]:
+    """Answer keys of each category index SET (``None`` for the uncategorized one)."""
+    indexed: dict[str | None, set[str]] = {}
+    for set_key in client.portal.call(redis_client.keys, f"{ANSWER_CACHE_CATEGORY_PREFIX}:*"):
+        slug = set_key.removeprefix(f"{ANSWER_CACHE_CATEGORY_PREFIX}:")
+        members = client.portal.call(redis_client.smembers, set_key)
+        category = None if slug == UNCATEGORIZED_SLUG else slug
+        indexed[category] = {f"{ANSWER_CACHE_KEY_PREFIX}:{member}" for member in members}
+    return indexed
+
+
 def test_e2e_should_answer_repeated_question_from_cache(semantic_cache_db: Any) -> None:
     # Arrange
     openai = _FakeOpenAIService(answer="Restaurante B")
@@ -565,7 +661,7 @@ def test_e2e_should_answer_repeated_question_from_cache(semantic_cache_db: Any) 
     with TestClient(app) as client:
         first = client.post("/chat", json=_online_chat_body("Onde comer?"))
         second = client.post("/chat", json=_online_chat_body("  onde COMER? "))
-        keys = client.portal.call(redis_client.keys, f"{ANSWER_CACHE_KEY_PREFIX}:*")
+        keys = _answer_keys(client, redis_client)
         ttl = client.portal.call(redis_client.ttl, keys[0])
 
     # Assert: same answer, but OpenAI chat and embedding were called only once.
@@ -631,7 +727,8 @@ def test_e2e_should_answer_from_semantic_then_exact_cache(semantic_cache_db: Any
         selects_after_second = semantic_cache_db.select_count
         # 3) question 2 again: exact hit, PostgreSQL not queried.
         third = client.post("/chat", json=_online_chat_body("Onde posso comprar marmitas?"))
-        keys = client.portal.call(redis_client.keys, f"{ANSWER_CACHE_KEY_PREFIX}:*")
+        keys = _answer_keys(client, redis_client)
+        indexed = _indexed_answer_keys(client, redis_client)
 
     # Assert
     messages = [_sse_messages(response) for response in (first, second, third)]
@@ -640,10 +737,200 @@ def test_e2e_should_answer_from_semantic_then_exact_cache(semantic_cache_db: Any
     assert rows_after_first == 1
     assert len(semantic_cache_db.rows) == 1
     assert len(keys) == 2
+    # The semantic-hit answer is indexed under the category of the reused entry.
+    category = semantic_cache_db.rows[0]["category"]
+    assert indexed == {category: set(keys)}
     assert selects_after_second == 2
     assert semantic_cache_db.select_count == 2
     assert openai.embedded_questions == ["onde vende marmitas?", "onde posso comprar marmitas?"]
     assert len(history.appended) == 6
+
+
+# --- Semantic cache invalidation cycle ----------------------------------------
+
+
+def _cycle_client(
+    semantic_cache_db: Any, redis_client: FakeAsyncRedis | None = None
+) -> tuple[TestClient, _FakeOpenAIService]:
+    """Real registration, deletion and search services sharing catalog and caches."""
+    openai = _FakeOpenAIService(answer="Padaria Central", category="ALIMENTAÇÃO")
+    vectors = _FakeVectorRepository()
+    categories = _category_service()
+    asyncio.run(categories.seed_initial())
+    redis_client = redis_client or FakeAsyncRedis(decode_responses=True)
+    registration = RegistrationService(
+        openai_service=openai,
+        vector_repository=vectors,
+        storage_repository=_FakeStorageRepository(),
+        category_service=categories,
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(redis_client),
+    )
+    deletion = DeletionService(
+        vector_repository=vectors,
+        storage_repository=_FakeStorageRepository(),
+        semantic_cache=_semantic_cache(),
+        answer_cache=_answer_cache(redis_client),
+    )
+    search = _search_service(openai, vectors, _FakeHistoryRepository(), redis_client, categories)
+    app = create_app()
+    app.dependency_overrides[get_registration_service] = lambda: registration
+    app.dependency_overrides[get_deletion_service] = lambda: deletion
+    app.dependency_overrides[get_search_service] = lambda: search
+    app.dependency_overrides[get_rate_limiter] = lambda: InMemoryRateLimiter()
+    return TestClient(app), openai
+
+
+def test_e2e_should_skip_semantic_cache_after_registration_in_same_category(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    client, openai = _cycle_client(semantic_cache_db)
+    client.post("/chat", json=_online_chat_body("Onde comer pao?"))
+    client.post("/chat", json=_online_chat_body("Onde posso comer pao?"))
+    assert len(openai.chat_phrases) == 1  # second question hit the semantic cache
+    assert [row["category"] for row in semantic_cache_db.rows] == ["alimentacao"]
+
+    # Act
+    response = client.post("/companies", json=_registration_payload("123", "Padaria Nova"))
+    client.post("/chat", json=_online_chat_body("Qual padaria fica perto?"))
+
+    # Assert: the cached rows are gone, so the pipeline ran again.
+    assert response.status_code == 201
+    assert len(openai.chat_phrases) == 2
+
+
+def test_e2e_should_skip_semantic_cache_after_deleting_client_of_the_category(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    client, openai = _cycle_client(semantic_cache_db)
+    client.post("/companies", json=_registration_payload("123"))
+    client.post("/chat", json=_online_chat_body("Onde comer pao?"))
+    assert [row["category"] for row in semantic_cache_db.rows] == ["alimentacao"]
+    calls_before = len(openai.chat_phrases)
+
+    # Act
+    response = client.request("DELETE", "/companies", json={"user_code": "123"})
+    client.post("/chat", json=_online_chat_body("Onde posso comer pao?"))
+
+    # Assert
+    assert response.status_code == 200
+    assert len(openai.chat_phrases) == calls_before + 1
+
+
+def test_e2e_should_keep_other_category_entries_after_registration_and_deletion(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange: a beauty answer cached before the food category changes.
+    client, openai = _cycle_client(semantic_cache_db)
+    openai.category = "BELEZA"
+    client.post("/chat", json=_online_chat_body("Onde cortar cabelo?"))
+    openai.category = "ALIMENTAÇÃO"
+    assert [row["category"] for row in semantic_cache_db.rows] == ["beleza"]
+
+    # Act
+    client.post("/companies", json=_registration_payload("123"))
+    client.request("DELETE", "/companies", json={"user_code": "123"})
+
+    # Assert: the beauty row survived; a similar question is still a semantic hit.
+    assert [row["category"] for row in semantic_cache_db.rows] == ["beleza"]
+    calls_before = len(openai.chat_phrases)
+    client.post("/chat", json=_online_chat_body("Onde posso cortar o cabelo?"))
+    assert len(openai.chat_phrases) == calls_before
+
+
+# --- Exact cache invalidation cycle -------------------------------------------
+
+
+def _cached_answer_keys(redis_client: FakeAsyncRedis) -> list[str]:
+    """Redis keys of the cached answers, read outside any running request."""
+
+    async def _keys() -> list[str]:
+        keys = await redis_client.keys(f"{ANSWER_CACHE_KEY_PREFIX}:*")
+        return [key for key in keys if not key.startswith(ANSWER_CACHE_CATEGORY_PREFIX)]
+
+    return asyncio.run(_keys())
+
+
+def test_e2e_should_miss_exact_cache_after_registration_in_same_category(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange: the question is answered once and then served by the exact cache.
+    client, openai = _cycle_client(semantic_cache_db)
+    client.post("/chat", json=_online_chat_body("Onde comer pao?"))
+    client.post("/chat", json=_online_chat_body("Onde comer pao?"))
+    assert len(openai.chat_phrases) == 1
+
+    # Act
+    response = client.post("/companies", json=_registration_payload("123", "Padaria Nova"))
+    client.post("/chat", json=_online_chat_body("Onde comer pao?"))
+
+    # Assert: the exact (and semantic) answers are gone, so the pipeline ran again.
+    assert response.status_code == 201
+    assert len(openai.chat_phrases) == 2
+
+
+def test_e2e_should_miss_exact_cache_after_deleting_client_of_the_category(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange
+    client, openai = _cycle_client(semantic_cache_db)
+    client.post("/companies", json=_registration_payload("123"))
+    client.post("/chat", json=_online_chat_body("Onde comer pao?"))
+    calls_before = len(openai.chat_phrases)
+
+    # Act
+    response = client.request("DELETE", "/companies", json={"user_code": "123"})
+    client.post("/chat", json=_online_chat_body("Onde comer pao?"))
+
+    # Assert
+    assert response.status_code == 200
+    assert len(openai.chat_phrases) == calls_before + 1
+
+
+def test_e2e_should_keep_exact_answer_of_other_category_after_registration_and_deletion(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange: a beauty answer cached before the food category changes.
+    client, openai = _cycle_client(semantic_cache_db)
+    openai.category = "BELEZA"
+    client.post("/chat", json=_online_chat_body("Onde cortar cabelo?"))
+    openai.category = "ALIMENTAÇÃO"
+
+    # Act
+    client.post("/companies", json=_registration_payload("123"))
+    client.request("DELETE", "/companies", json={"user_code": "123"})
+
+    # Assert: the same beauty question is an exact hit (no LLM, no semantic lookup).
+    openai.category = "BELEZA"
+    calls_before = len(openai.chat_phrases)
+    selects_before = semantic_cache_db.select_count
+    response = client.post("/chat", json=_online_chat_body("Onde cortar cabelo?"))
+    assert _sse_messages(response) == [INTRO, "Padaria Central"]
+    assert len(openai.chat_phrases) == calls_before
+    assert semantic_cache_db.select_count == selects_before
+
+
+def test_e2e_should_invalidate_exact_answers_of_both_categories_when_client_moves(
+    semantic_cache_db: Any,
+) -> None:
+    # Arrange: client in beleza; one cached answer in beleza and one in alimentacao.
+    redis_client = FakeAsyncRedis(decode_responses=True)
+    client, openai = _cycle_client(semantic_cache_db, redis_client)
+    openai.category = "BELEZA"
+    client.post("/companies", json=_registration_payload("123", "Salao"))
+    client.post("/chat", json=_online_chat_body("Onde cortar cabelo?"))
+    openai.category = "ALIMENTAÇÃO"
+    client.post("/chat", json=_online_chat_body("Onde comer pao?"))
+    assert len(_cached_answer_keys(redis_client)) == 2
+
+    # Act: the client moves from beleza to alimentacao.
+    response = client.post("/companies", json=_registration_payload("123", "Padaria"))
+
+    # Assert
+    assert response.status_code == 201
+    assert _cached_answer_keys(redis_client) == []
 
 
 # --- Short messages -----------------------------------------------------------

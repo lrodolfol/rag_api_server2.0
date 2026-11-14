@@ -52,9 +52,15 @@ def _match(text: str, score: float = 0.95) -> VectorMatch:
     return VectorMatch(id="id", score=score, text=text, user_code="123")
 
 
-def _semantic_match(response: str, similarity: float) -> SemanticCacheMatch:
+def _semantic_match(
+    response: str, similarity: float, category: str | None = None
+) -> SemanticCacheMatch:
     return SemanticCacheMatch(
-        input_text="pergunta", response=response, distance=1 - similarity, similarity=similarity
+        input_text="pergunta",
+        response=response,
+        distance=1 - similarity,
+        similarity=similarity,
+        category=category,
     )
 
 
@@ -288,7 +294,7 @@ async def test_should_treat_corrupted_cached_value_as_miss(
     assert messages == [INTRO, "Padaria Central"]
     openai.generate_chat_answer.assert_awaited_once()
     answer_cache.set.assert_awaited_once_with(
-        _expected_key("onde comer?"), _json("Padaria Central")
+        _expected_key("onde comer?"), _json("Padaria Central"), {"alimentacao"}
     )
     assert any(record.levelno == logging.WARNING for record in caplog.records)
     assert "texto puro antigo" not in caplog.text
@@ -388,7 +394,7 @@ async def test_should_store_semantic_answer_json_in_exact_cache_and_text_in_hist
 
     # Assert
     mocks.answer_cache.set.assert_awaited_once_with(
-        _expected_key(QUESTION), _json("Marmitaria Central")
+        _expected_key(QUESTION), _json("Marmitaria Central"), {None}
     )
     appended = mocks.history.append_message.await_args_list
     assert [call.args[2].role for call in appended] == [
@@ -418,7 +424,7 @@ async def test_should_merge_accepted_semantic_matches_without_duplicates() -> No
     assert messages == [INTRO, *expected_items]
     mocks.openai.generate_chat_answer.assert_not_awaited()
     mocks.answer_cache.set.assert_awaited_once_with(
-        _expected_key(QUESTION), _json(*expected_items)
+        _expected_key(QUESTION), _json(*expected_items), {None}
     )
 
 
@@ -436,10 +442,10 @@ async def test_should_run_rag_and_store_json_in_both_caches_on_semantic_miss() -
     mocks.vectors.query.assert_awaited_once_with([0.7, 0.8], category_slug="alimentacao")
     mocks.openai.generate_chat_answer.assert_awaited_once()
     mocks.answer_cache.set.assert_awaited_once_with(
-        _expected_key(QUESTION), _json("Padaria Central")
+        _expected_key(QUESTION), _json("Padaria Central"), {"alimentacao"}
     )
     mocks.semantic_cache.store.assert_awaited_once_with(
-        EXPECTED_FINGERPRINT, QUESTION, DEFAULT_ANSWER, [0.7, 0.8]
+        EXPECTED_FINGERPRINT, QUESTION, DEFAULT_ANSWER, [0.7, 0.8], category_slug="alimentacao"
     )
 
 
@@ -455,9 +461,11 @@ async def test_should_run_rag_when_all_semantic_matches_are_below_threshold() ->
     assert messages == [INTRO, "Padaria Central"]
     mocks.openai.generate_chat_answer.assert_awaited_once()
     mocks.answer_cache.set.assert_awaited_once_with(
-        _expected_key(QUESTION), _json("Padaria Central")
+        _expected_key(QUESTION), _json("Padaria Central"), {"alimentacao"}
     )
-    mocks.semantic_cache.store.assert_awaited_once()
+    mocks.semantic_cache.store.assert_awaited_once_with(
+        EXPECTED_FINGERPRINT, QUESTION, DEFAULT_ANSWER, [0.1, 0.2], category_slug="alimentacao"
+    )
 
 
 @pytest.mark.asyncio
@@ -778,3 +786,159 @@ async def test_should_classify_the_question_alone_without_history() -> None:
 
     # Assert
     mocks.openai.classify_question.assert_awaited_once_with("e pizza?", CATALOG)
+
+
+# --- Category stored in the semantic cache -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_should_store_classified_category_slug_in_semantic_cache() -> None:
+    # Arrange
+    mocks = _mocks()
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    assert mocks.semantic_cache.store.await_args.kwargs == {"category_slug": "alimentacao"}
+
+
+@pytest.mark.asyncio
+async def test_should_store_none_category_when_catalog_is_empty() -> None:
+    # Arrange
+    mocks = _mocks()
+    mocks.category_repository.get_all.return_value = []
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    assert mocks.semantic_cache.store.await_args.kwargs == {"category_slug": None}
+
+
+@pytest.mark.asyncio
+async def test_should_store_none_category_when_classification_fails() -> None:
+    # Arrange
+    mocks = _mocks()
+    mocks.openai.classify_question.side_effect = OpenIaException("boom")
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    assert mocks.semantic_cache.store.await_args.kwargs == {"category_slug": None}
+
+
+@pytest.mark.asyncio
+async def test_should_store_none_category_when_llm_category_is_unknown() -> None:
+    # Arrange
+    mocks = _mocks()
+    mocks.openai.classify_question.return_value = "INEXISTENTE"
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    assert mocks.semantic_cache.store.await_args.kwargs == {"category_slug": None}
+
+
+# --- Category index of the exact cache ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_should_index_exact_answer_in_classified_category() -> None:
+    # Arrange
+    mocks = _mocks()
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    assert mocks.answer_cache.set.await_args.args[2] == {"alimentacao"}
+
+
+@pytest.mark.asyncio
+async def test_should_index_exact_answer_as_uncategorized_when_classification_fails() -> None:
+    # Arrange
+    mocks = _mocks()
+    mocks.openai.classify_question.side_effect = OpenIaException("boom")
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    assert mocks.answer_cache.set.await_args.args[2] == {None}
+
+
+@pytest.mark.asyncio
+async def test_should_index_exact_answer_as_uncategorized_when_catalog_is_empty() -> None:
+    # Arrange
+    mocks = _mocks()
+    mocks.category_repository.get_all.return_value = []
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    assert mocks.answer_cache.set.await_args.args[2] == {None}
+
+
+@pytest.mark.asyncio
+async def test_should_index_semantic_answer_in_categories_of_accepted_matches_only() -> None:
+    # Arrange
+    mocks = _mocks(
+        semantic_matches=[
+            _semantic_match(_json("Marmitaria Central"), 0.98, category="alimentacao"),
+            _semantic_match(_json("Salao Bela"), 0.50, category="beleza"),
+            _semantic_match(_json("Padaria e Salao"), 0.93),
+            _semantic_match("texto puro antigo", 0.95, category="transporte"),
+        ]
+    )
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    mocks.answer_cache.set.assert_awaited_once_with(
+        _expected_key(QUESTION),
+        _json("Marmitaria Central", "Padaria e Salao"),
+        {"alimentacao", None},
+    )
+
+
+@pytest.mark.asyncio
+async def test_should_index_semantic_answer_once_per_repeated_category() -> None:
+    # Arrange
+    mocks = _mocks(
+        semantic_matches=[
+            _semantic_match(_json("Marmitaria Central"), 0.98, category="alimentacao"),
+            _semantic_match(_json("Padaria A"), 0.95, category="alimentacao"),
+        ]
+    )
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    assert mocks.answer_cache.set.await_args.args[2] == {"alimentacao"}
+
+
+@pytest.mark.asyncio
+async def test_should_warn_only_once_for_corrupted_semantic_match(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    mocks = _mocks(
+        semantic_matches=[
+            _semantic_match(_json("Marmitaria Central"), 0.98, category="alimentacao"),
+            _semantic_match("texto puro antigo", 0.95),
+        ]
+    )
+
+    # Act
+    with caplog.at_level(logging.WARNING):
+        await mocks.service.search(HistoryChannel.ONLINE, "123", QUESTION)
+
+    # Assert
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == 1

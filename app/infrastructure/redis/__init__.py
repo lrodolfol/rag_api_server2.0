@@ -1,13 +1,16 @@
 """Redis integration package.
 
 Exposes the async conversation-history and answer-cache repositories used by
-the search flow, the categories catalog repository, the factory that builds the underlying async client from the
+the search flow (the answer cache is indexed by category for invalidation), the
+categories catalog repository, the factory that builds the underlying async client from the
 typed configuration, the per-channel key model, and the TTL/prefix constants.
 """
 
 from app.infrastructure.redis.answer_cache_repository import (
+    ANSWER_CACHE_CATEGORY_PREFIX,
     ANSWER_CACHE_KEY_PREFIX,
     ANSWER_CACHE_TTL_SECONDS,
+    UNCATEGORIZED_SLUG,
     RedisAnswerCacheRepository,
 )
 from app.infrastructure.redis.category_repository import RedisCategoryRepository
@@ -19,9 +22,11 @@ from app.infrastructure.redis.repository import (
 )
 
 __all__ = [
+    "ANSWER_CACHE_CATEGORY_PREFIX",
     "ANSWER_CACHE_KEY_PREFIX",
     "ANSWER_CACHE_TTL_SECONDS",
     "HISTORY_TTL_SECONDS",
+    "UNCATEGORIZED_SLUG",
     "HistoryChannel",
     "RedisAnswerCacheRepository",
     "RedisCategoryRepository",

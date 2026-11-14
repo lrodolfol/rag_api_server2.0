@@ -15,7 +15,8 @@ WhatsApp and online-chat endpoints, so the flow is defined once:
 * look up the semantic cache with that embedding; only matches whose similarity
   reaches ``SIMILARITY_THRESHOLD`` count, and their answers are merged (most
   similar first, without duplicated items); a hit returns the merged answer and
-  also stores its JSON in the exact cache under the current key;
+  also stores its JSON in the exact cache under the current key, indexed under
+  the categories of the accepted matches;
 * load the user's prior history for the channel;
 * classify the question alone (no history) into one of the catalog categories
   with the language model; the search runs without a category filter when the
@@ -26,6 +27,10 @@ WhatsApp and online-chat endpoints, so the flow is defined once:
 * ask the language model for a :class:`ChatAnswer` from the guide, history and
   matches;
 * store the answer JSON in the exact and semantic caches when it is cacheable;
+  both record the slug of the category the question was classified in (``None``
+  when the search ran without a category filter): the semantic entry in its
+  ``category`` column, the exact entry in that category's index, so a change in
+  one of its services invalidates the answer;
 * persist the question/answer turn (items joined into readable text),
   refreshing the 30-minute history TTL;
 * return the messages for the client: a random intro followed by each item, or
@@ -40,7 +45,7 @@ infrastructure and cache services, so this layer only coordinates the steps
 without duplicating their logic.
 """
 from random import choice
-from typing import Final
+from typing import Final, NamedTuple
 
 from app.application.cache import (
     SemanticCacheService,
@@ -119,6 +124,20 @@ _INVALID_MESSAGE_RESPONSES: Final[tuple[str, ...]] = (
     "Sua mensagem ficou um pouco vaga. Pode explicar melhor o que deseja saber?",
     "Não consegui identificar o que você precisa. Tente enviar uma pergunta mais completa!",
 )
+
+
+class _PipelineResult(NamedTuple):
+    """Answer of the RAG pipeline and the category slug used in the vector search."""
+
+    answer: ChatAnswer
+    category_slug: str | None
+
+
+class _AcceptedAnswer(NamedTuple):
+    """Parsed answer of a semantic match at or above the threshold, with its category."""
+
+    answer: ChatAnswer
+    category_slug: str | None
 
 
 class SearchService:
@@ -216,10 +235,12 @@ class SearchService:
         )
         if semantic_answer is not None:
             return semantic_answer
-        answer = await self._run_pipeline(channel, user_key, question, embedding)
-        await self._store_answer(cache_key, fingerprint, question, answer, embedding)
+        result = await self._run_pipeline(channel, user_key, question, embedding)
+        await self._store_answer(
+            cache_key, fingerprint, question, result.answer, embedding, result.category_slug
+        )
         logger.info("RAG pipeline completed, response ready for channel='%s'", channel.value)
-        return answer
+        return result.answer
 
     async def _answer_from_semantic_cache(
         self,
@@ -228,9 +249,14 @@ class SearchService:
         fingerprint: CacheFingerprint,
         embedding: list[float],
     ) -> ChatAnswer | None:
-        """Return the merged answer of the matches above the threshold, also caching it."""
+        """Return the merged answer of the matches above the threshold, also caching it.
+
+        The exact-cache entry is indexed under the categories of the accepted
+        matches, so it is invalidated together with any of them.
+        """
         matches = await self._semantic_cache.find_answer(fingerprint, embedding)
-        semantic_answer = self.threshold_evaluate(matches)
+        accepted = self._accepted_answers(matches)
+        semantic_answer = self._merge(accepted)
         short_key = cache_key[:_LOGGED_KEY_LENGTH]
         if semantic_answer is None:
             logger.info(
@@ -242,20 +268,31 @@ class SearchService:
             channel.value,
             short_key,
         )
-        await self._answer_cache.set(cache_key, semantic_answer.to_json())
+        category_slugs = {item.category_slug for item in accepted}
+        await self._answer_cache.set(cache_key, semantic_answer.to_json(), category_slugs)
         return semantic_answer
 
     @classmethod
     def threshold_evaluate(cls, matches: list[SemanticCacheMatch]) -> ChatAnswer | None:
         """Merge the answers at or above the threshold, or ``None`` if no item is accepted."""
-        accepted_answers: list[ChatAnswer] = []
+        return cls._merge(cls._accepted_answers(matches))
+
+    @classmethod
+    def _accepted_answers(cls, matches: list[SemanticCacheMatch]) -> list[_AcceptedAnswer]:
+        """Parse the matches at or above the threshold, skipping corrupted answers."""
+        accepted: list[_AcceptedAnswer] = []
         for match in matches:
             if match.similarity < cls.SIMILARITY_THRESHOLD:
                 continue
             answer = cls._parse_cached(match.response, "semantic")
             if answer is not None:
-                accepted_answers.append(answer)
-        merged = ChatAnswer.merge(accepted_answers)
+                accepted.append(_AcceptedAnswer(answer, match.category))
+        return accepted
+
+    @staticmethod
+    def _merge(accepted: list[_AcceptedAnswer]) -> ChatAnswer | None:
+        """Merge the accepted answers, or ``None`` when the result has no item."""
+        merged = ChatAnswer.merge([item.answer for item in accepted])
         return None if merged.is_empty() else merged
 
     async def _run_pipeline(
@@ -264,7 +301,7 @@ class SearchService:
         user_key: str,
         question: str,
         embedding: list[float],
-    ) -> ChatAnswer:
+    ) -> _PipelineResult:
         """Generate the answer from history, vector matches and the language model."""
         history = await self._history.get_history(channel, user_key)
         logger.info("History loaded: %d messages for channel='%s'", len(history), channel.value)
@@ -273,9 +310,10 @@ class SearchService:
         logger.info("Vector search completed: %d relevant matches found", len(matches))
         payload = PayloadQuestionOpenIA(question=question, chat_historic=history)
         logger.info("Requesting chat answer from OpenAI")
-        return await self._openai.generate_chat_answer(
+        answer = await self._openai.generate_chat_answer(
             payload, self._to_phrases(matches)
         )
+        return _PipelineResult(answer, category_slug)
 
     async def _store_answer(
         self,
@@ -284,14 +322,17 @@ class SearchService:
         question: str,
         answer: ChatAnswer,
         embedding: list[float],
+        category_slug: str | None,
     ) -> None:
         """Store the LLM answer JSON in both caches unless it is not cacheable."""
         if not is_cacheable_answer(answer):
             logger.info("Answer not cacheable (key='%s')", cache_key[:_LOGGED_KEY_LENGTH])
             return
         # The repositories log the successful writes (or their failures).
-        await self._answer_cache.set(cache_key, answer.to_json())
-        await self._semantic_cache.store(fingerprint, question, answer, embedding)
+        await self._answer_cache.set(cache_key, answer.to_json(), {category_slug})
+        await self._semantic_cache.store(
+            fingerprint, question, answer, embedding, category_slug=category_slug
+        )
 
     async def _classify_question(self, question: str) -> str | None:
         """Return the catalog category slug of ``question``, or ``None`` (no filter)."""

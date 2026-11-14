@@ -5,13 +5,18 @@ the prompt and business-rule versions, the configured model capability and the
 normalized question. Any change in one of them yields a different cache key.
 
 The semantic cache stores answers together with the embedding of the normalized
-question, so semantically similar questions can reuse a previous answer.
+question, so semantically similar questions can reuse a previous answer. Each
+entry also carries the slug of the category the question was classified into
+(``None`` when the search ran without a category filter), so the entries of a
+category can be invalidated when one of its services changes. A lookup match
+carries that category too, so an answer reused from the semantic cache can be
+indexed under the categories it came from.
 """
 
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CacheFingerprint(BaseModel):
@@ -36,6 +41,8 @@ class SemanticCacheEntry(BaseModel):
     response: str
     embedding: list[float]
     created_at: datetime
+    # Category slug of the question; ``None`` when the search ran without a filter.
+    category: str | None = Field(default=None, min_length=1)
 
 
 class SemanticCacheMatch(BaseModel):
@@ -47,3 +54,5 @@ class SemanticCacheMatch(BaseModel):
     response: str
     distance: float
     similarity: float
+    # Category slug of the matched entry; ``None`` when it has no category.
+    category: str | None = Field(default=None, min_length=1)

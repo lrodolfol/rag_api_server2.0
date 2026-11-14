@@ -25,6 +25,8 @@ class Mocks:
     vectors: AsyncMock
     storage: AsyncMock
     categories: AsyncMock
+    semantic_cache: AsyncMock
+    answer_cache: AsyncMock
 
 
 def _registration(
@@ -64,13 +66,17 @@ def _mocks(
     categories = AsyncMock()
     categories.list_names.return_value = list(CATALOG)
     categories.resolve_or_create.return_value = Category.from_name(resolved)
+    semantic_cache = AsyncMock()
+    answer_cache = AsyncMock()
     service = RegistrationService(
         openai_service=openai,
         vector_repository=vectors,
         storage_repository=storage,
         category_service=categories,
+        semantic_cache=semantic_cache,
+        answer_cache=answer_cache,
     )
-    return Mocks(service, openai, vectors, storage, categories)
+    return Mocks(service, openai, vectors, storage, categories, semantic_cache, answer_cache)
 
 
 @pytest.mark.asyncio
@@ -135,6 +141,112 @@ async def test_should_stop_without_any_write_on_inappropriate_content() -> None:
     mocks.vectors.upsert_company_vectors.assert_not_awaited()
     mocks.storage.delete_client.assert_not_awaited()
     mocks.storage.save_client.assert_not_awaited()
+    mocks.semantic_cache.invalidate_category.assert_not_awaited()
+    mocks.answer_cache.invalidate_category.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_new_category_on_first_registration() -> None:
+    # Arrange
+    mocks = _mocks(previous_slug=None)
+
+    # Act
+    await mocks.service.register(_registration())
+
+    # Assert
+    mocks.semantic_cache.invalidate_category.assert_awaited_once_with("alimentacao")
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_category_once_when_it_did_not_change() -> None:
+    # Arrange
+    mocks = _mocks(previous_slug="alimentacao")
+
+    # Act
+    await mocks.service.register(_registration())
+
+    # Assert
+    mocks.semantic_cache.invalidate_category.assert_awaited_once_with("alimentacao")
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_new_and_previous_category_when_it_changed() -> None:
+    # Arrange
+    mocks = _mocks(llm_category="ALIMENTAÇÃO", resolved="ALIMENTAÇÃO", previous_slug="beleza")
+
+    # Act
+    await mocks.service.register(_registration())
+
+    # Assert
+    assert [c.args for c in mocks.semantic_cache.invalidate_category.await_args_list] == [
+        ("alimentacao",),
+        ("beleza",),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_right_after_upsert_and_before_storage_writes() -> None:
+    # Arrange
+    mocks = _mocks(previous_slug="beleza")
+    calls = MagicMock()
+    calls.attach_mock(mocks.vectors.upsert_company_vectors, "upsert")
+    calls.attach_mock(mocks.semantic_cache.invalidate_category, "invalidate_semantic")
+    calls.attach_mock(mocks.answer_cache.invalidate_category, "invalidate_exact")
+    calls.attach_mock(mocks.storage.delete_client, "delete_old")
+    calls.attach_mock(mocks.storage.save_client, "save_new")
+
+    # Act
+    await mocks.service.register(_registration())
+
+    # Assert
+    assert [call[0] for call in calls.mock_calls] == [
+        "upsert",
+        "invalidate_semantic",
+        "invalidate_exact",
+        "invalidate_semantic",
+        "invalidate_exact",
+        "delete_old",
+        "save_new",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_exact_cache_of_new_category_on_first_registration() -> None:
+    # Arrange
+    mocks = _mocks(previous_slug=None)
+
+    # Act
+    await mocks.service.register(_registration())
+
+    # Assert
+    mocks.answer_cache.invalidate_category.assert_awaited_once_with("alimentacao")
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_exact_cache_once_when_category_did_not_change() -> None:
+    # Arrange
+    mocks = _mocks(previous_slug="alimentacao")
+
+    # Act
+    await mocks.service.register(_registration())
+
+    # Assert
+    mocks.answer_cache.invalidate_category.assert_awaited_once_with("alimentacao")
+
+
+@pytest.mark.asyncio
+async def test_should_invalidate_exact_cache_of_new_and_previous_category_when_it_changed() -> None:
+    # Arrange
+    mocks = _mocks(llm_category="ALIMENTAÇÃO", resolved="ALIMENTAÇÃO", previous_slug="beleza")
+
+    # Act
+    await mocks.service.register(_registration())
+
+    # Assert
+    assert [c.args for c in mocks.answer_cache.invalidate_category.await_args_list] == [
+        ("alimentacao",),
+        ("beleza",),
+    ]
 
 
 @pytest.mark.asyncio
@@ -201,5 +313,7 @@ async def test_should_log_category_but_never_user_code_or_content(
     # Assert
     assert "Registration category defined: 'BELEZA'" in caplog.text
     assert "changed from 'alimentacao' to 'beleza'" in caplog.text
+    assert mocks.semantic_cache.invalidate_category.await_count == 2
+    assert mocks.answer_cache.invalidate_category.await_count == 2
     assert "secret-code" not in caplog.text
     assert "Salao Secreto" not in caplog.text
