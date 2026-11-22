@@ -11,6 +11,7 @@ from app.application.search import SearchService
 from app.application.search import service as search_service
 from app.domain import (
     ChatAnswer,
+    MessageContext,
     MessageHistoryItem,
     MessageRole,
     OpenIaException,
@@ -189,7 +190,9 @@ async def test_should_pass_matched_texts_as_phrases_and_prior_history() -> None:
 async def test_should_persist_question_and_joined_items_on_given_channel() -> None:
     # Arrange
     answer = ChatAnswer(respostas=["Padaria Central", "Café São João"])
-    service, _, _, history_repo = _service(answer=answer)
+    service, _, _, history_repo = _service(
+        answer=answer, matches=[_match("Padaria A"), _match("Restaurante B")]
+    )
 
     # Act
     await service.search(HistoryChannel.ONLINE, "123", "onde comer?")
@@ -203,6 +206,62 @@ async def test_should_persist_question_and_joined_items_on_given_channel() -> No
     assert appended[0].args[2].text == "onde comer?"
     assert appended[1].args[2].role is MessageRole.ASSISTANT
     assert appended[1].args[2].text == "Padaria Central\n\nCafé São João"
+    assert appended[0].args[2].context is None
+    assert appended[1].args[2].context == MessageContext(
+        rag_matches=["Padaria A", "Restaurante B"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_should_persist_assistant_turn_without_context_when_there_are_no_matches() -> None:
+    # Arrange
+    service, _, _, history_repo = _service(matches=[])
+
+    # Act
+    await service.search(HistoryChannel.ONLINE, "123", "onde comer?")
+
+    # Assert
+    appended = history_repo.append_message.await_args_list
+    assert [call.args[2].role for call in appended] == [
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+    ]
+    assert appended[1].args[2].text == "Padaria Central"
+    assert appended[1].args[2].context is None
+
+
+@pytest.mark.asyncio
+async def test_should_not_store_rag_matches_in_exact_or_semantic_cache() -> None:
+    # Arrange
+    mocks = _mocks(matches=[_match("Texto do match A"), _match("Texto do match B")])
+
+    # Act
+    await mocks.service.search(HistoryChannel.ONLINE, "123", "onde comer?")
+
+    # Assert
+    mocks.answer_cache.set.assert_awaited_once_with(
+        _expected_key("onde comer?"), _json("Padaria Central"), {"alimentacao"}
+    )
+    mocks.semantic_cache.store.assert_awaited_once_with(
+        build_fingerprint("onde comer?", FINGER_PRINT),
+        "onde comer?",
+        DEFAULT_ANSWER,
+        [0.1, 0.2],
+        category_slug="alimentacao",
+    )
+
+
+@pytest.mark.asyncio
+async def test_should_not_log_rag_matches_content(caplog: pytest.LogCaptureFixture) -> None:
+    # Arrange
+    service, _, _, _ = _service(matches=[_match("Conteudo sigiloso do match")])
+
+    # Act
+    with caplog.at_level(logging.DEBUG):
+        await service.search(HistoryChannel.ONLINE, "123", "onde comer?")
+
+    # Assert
+    assert "Conteudo sigiloso do match" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -275,6 +334,7 @@ async def test_should_persist_turn_in_history_on_cache_hit() -> None:
         MessageRole.ASSISTANT,
     ]
     assert appended[1].args[2].text == "Resposta 1\n\nResposta 2"
+    assert appended[1].args[2].context is None
 
 
 @pytest.mark.asyncio
@@ -403,6 +463,7 @@ async def test_should_store_semantic_answer_json_in_exact_cache_and_text_in_hist
     ]
     assert appended[0].args[2].text == QUESTION
     assert appended[1].args[2].text == "Marmitaria Central"
+    assert appended[1].args[2].context is None
 
 
 @pytest.mark.asyncio

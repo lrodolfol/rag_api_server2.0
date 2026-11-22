@@ -5,6 +5,10 @@ WhatsApp and online-chat histories never collide. Every append refreshes a
 30-minute sliding TTL, matching the product requirement that history expires
 after 30 minutes of inactivity.
 
+Each list item is a JSON object ``{"role": ..., "text": ...}``; assistant
+messages answered through RAG also carry ``"context": {"rag_matches": [...]}``.
+Items without ``context`` (including those stored before it existed) stay valid.
+
 The :class:`redis.asyncio.Redis` client is injected (never built here) to keep
 the repository unit-testable. Redis failures are translated into the domain
 :class:`HistoryStoreError`; user codes are never logged.
@@ -67,7 +71,8 @@ class RedisHistoryRepository:
 
     @staticmethod
     def _serialize(message: MessageHistoryItem) -> str:
-        return message.model_dump_json()
+        """Serialize a message, omitting unset optional fields such as ``context``."""
+        return message.model_dump_json(exclude_none=True)
 
     @staticmethod
     def _deserialize(raw_item: str | bytes) -> MessageHistoryItem:

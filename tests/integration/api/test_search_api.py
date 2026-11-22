@@ -49,6 +49,7 @@ from app.infrastructure.redis import (
     HistoryChannel,
     RedisAnswerCacheRepository,
     RedisCategoryRepository,
+    RedisHistoryRepository,
 )
 from app.main import create_app
 
@@ -262,9 +263,13 @@ CATEGORIES_CONFIG = CategoriesConfig(
 
 
 class _Pipeline:
-    """Real :class:`SearchService` wired to mocked OpenAI, Pinecone and history."""
+    """Real :class:`SearchService` wired to mocked OpenAI, Pinecone and history.
 
-    def __init__(self) -> None:
+    When ``history_redis`` is given, the real :class:`RedisHistoryRepository`
+    runs over that in-memory Redis instead of the mocked history.
+    """
+
+    def __init__(self, history_redis: FakeAsyncRedis | None = None) -> None:
         self.openai = AsyncMock()
         self.openai.generate_embedding_for_question.return_value = EMBEDDING
         self.openai.generate_chat_answer.return_value = ChatAnswer(respostas=["Marmitaria Central"])
@@ -273,8 +278,10 @@ class _Pipeline:
         self.vectors.query.return_value = [
             VectorMatch(id="v1", score=0.95, text="Marmitaria Central", user_code="1")
         ]
-        self.history = AsyncMock()
+        self.history: Any = AsyncMock()
         self.history.get_history.return_value = []
+        if history_redis is not None:
+            self.history = RedisHistoryRepository(history_redis)
         self.redis = FakeAsyncRedis(decode_responses=True)
         # Catalog on its own in-memory Redis (seeded by the app lifespan) so the
         # answer-cache key assertions only see cache keys.
@@ -398,6 +405,37 @@ def test_should_run_rag_when_semantic_similarity_is_below_threshold(
     assert pipeline.openai.generate_chat_answer.await_count == 2
     assert pipeline.vectors.query.await_count == 2
     assert len(semantic_cache_db.rows) == 2
+
+
+@pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])
+def test_should_store_rag_matches_in_history_only_for_pipeline_answers(
+    endpoint: str, semantic_cache_db: Any
+) -> None:
+    # Arrange: the first question runs the pipeline, the repeated one hits the
+    # exact cache; both turns land in the real history repository.
+    history_redis = FakeAsyncRedis(decode_responses=True)
+    pipeline = _Pipeline(history_redis)
+
+    # Act
+    with pipeline.client() as client:
+        _post_question(client, endpoint, RAW_QUESTION)
+        _post_question(client, endpoint, RAW_QUESTION)
+        history_keys = client.portal.call(history_redis.keys, "*")
+        raw_items = client.portal.call(history_redis.lrange, history_keys[0], 0, -1)
+
+    # Assert
+    assert len(history_keys) == 1
+    assert [json.loads(item) for item in raw_items] == [
+        {"role": "user", "text": RAW_QUESTION},
+        {
+            "role": "assistant",
+            "text": "Marmitaria Central",
+            "context": {"rag_matches": ["Marmitaria Central"]},
+        },
+        {"role": "user", "text": RAW_QUESTION},
+        {"role": "assistant", "text": "Marmitaria Central"},
+    ]
+    pipeline.openai.generate_chat_answer.assert_awaited_once()
 
 
 @pytest.mark.parametrize("endpoint", ["/whatsapp", "/chat"])

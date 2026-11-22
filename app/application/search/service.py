@@ -32,7 +32,11 @@ WhatsApp and online-chat endpoints, so the flow is defined once:
   ``category`` column, the exact entry in that category's index, so a change in
   one of its services invalidates the answer;
 * persist the question/answer turn (items joined into readable text),
-  refreshing the 30-minute history TTL;
+  refreshing the 30-minute history TTL; when the answer came from the RAG
+  pipeline, the assistant message also records the matched texts sent to the
+  model in ``context.rag_matches`` (in vector-store order). Answers from the
+  exact or semantic cache, or a search without matches, are stored without
+  ``context``, and the caches never receive the matches;
 * return the messages for the client: a random intro followed by each item, or
   a single random 'not found' message when there are no items.
 
@@ -59,6 +63,7 @@ from app.domain import (
     CacheFingerprint,
     ChatAnswer,
     InvalidChatAnswerError,
+    MessageContext,
     MessageHistoryItem,
     MessageRole,
     OpenIaException,
@@ -127,10 +132,18 @@ _INVALID_MESSAGE_RESPONSES: Final[tuple[str, ...]] = (
 
 
 class _PipelineResult(NamedTuple):
-    """Answer of the RAG pipeline and the category slug used in the vector search."""
+    """Answer of the RAG pipeline, the category slug and the matched texts used."""
 
     answer: ChatAnswer
     category_slug: str | None
+    rag_matches: list[str]
+
+
+class _ResolvedAnswer(NamedTuple):
+    """Answer for the client plus the RAG matched texts behind it (empty when cached)."""
+
+    answer: ChatAnswer
+    rag_matches: list[str]
 
 
 class _AcceptedAnswer(NamedTuple):
@@ -172,13 +185,17 @@ class SearchService:
         logger.info("Starting RAG pipeline for channel='%s'", channel.value)
         fingerprint = build_fingerprint(question, self._fingerprint_config)
         cache_key = build_cache_key(fingerprint)
-        answer = await self._get_cached_answer(channel, cache_key)
-        if answer is None:
-            answer = await self._answer_on_cache_miss(
+        cached_answer = await self._get_cached_answer(channel, cache_key)
+        if cached_answer is not None:
+            resolved = _ResolvedAnswer(cached_answer, rag_matches=[])
+        else:
+            resolved = await self._answer_on_cache_miss(
                 channel, user_key, question, fingerprint, cache_key
             )
-        await self._persist_turn(channel, user_key, question, answer)
-        return self._to_client_messages(answer)
+        await self._persist_turn(
+            channel, user_key, question, resolved.answer, resolved.rag_matches
+        )
+        return self._to_client_messages(resolved.answer)
 
     @staticmethod
     def _short_message_reply(channel: HistoryChannel) -> list[str]:
@@ -224,7 +241,7 @@ class SearchService:
         question: str,
         fingerprint: CacheFingerprint,
         cache_key: str,
-    ) -> ChatAnswer:
+    ) -> _ResolvedAnswer:
         """Answer from the semantic cache or, on a miss, from the RAG pipeline."""
         # Embedded once from the normalized text and reused by every later step.
         embedding = await self._openai.generate_embedding_for_question(
@@ -234,13 +251,13 @@ class SearchService:
             channel, cache_key, fingerprint, embedding
         )
         if semantic_answer is not None:
-            return semantic_answer
+            return _ResolvedAnswer(semantic_answer, rag_matches=[])
         result = await self._run_pipeline(channel, user_key, question, embedding)
         await self._store_answer(
             cache_key, fingerprint, question, result.answer, embedding, result.category_slug
         )
         logger.info("RAG pipeline completed, response ready for channel='%s'", channel.value)
-        return result.answer
+        return _ResolvedAnswer(result.answer, result.rag_matches)
 
     async def _answer_from_semantic_cache(
         self,
@@ -309,11 +326,10 @@ class SearchService:
         matches = await self._find_matches(embedding, category_slug)
         logger.info("Vector search completed: %d relevant matches found", len(matches))
         payload = PayloadQuestionOpenIA(question=question, chat_historic=history)
+        phrases = self._to_phrases(matches)
         logger.info("Requesting chat answer from OpenAI")
-        answer = await self._openai.generate_chat_answer(
-            payload, self._to_phrases(matches)
-        )
-        return _PipelineResult(answer, category_slug)
+        answer = await self._openai.generate_chat_answer(payload, phrases)
+        return _PipelineResult(answer, category_slug, phrases)
 
     async def _store_answer(
         self,
@@ -359,18 +375,29 @@ class SearchService:
         return await self._vectors.query(embedding, category_slug=category_slug)
 
     async def _persist_turn(
-        self, channel: HistoryChannel, user_key: str, question: str, answer: ChatAnswer
+        self,
+        channel: HistoryChannel,
+        user_key: str,
+        question: str,
+        answer: ChatAnswer,
+        rag_matches: list[str],
     ) -> None:
-        """Append the question and (when it has items) the answer text to the history."""
+        """Append the question and (when it has items) the answer to the history."""
         await self._history.append_message(
             channel, user_key, MessageHistoryItem(role=MessageRole.USER, text=question)
         )
         if not answer.is_empty():
             await self._history.append_message(
-                channel,
-                user_key,
-                MessageHistoryItem(role=MessageRole.ASSISTANT, text=answer.as_text()),
+                channel, user_key, self._assistant_message(answer, rag_matches)
             )
+
+    @staticmethod
+    def _assistant_message(answer: ChatAnswer, rag_matches: list[str]) -> MessageHistoryItem:
+        """Build the assistant message, with the RAG context only when there are matches."""
+        context = MessageContext(rag_matches=rag_matches) if rag_matches else None
+        return MessageHistoryItem(
+            role=MessageRole.ASSISTANT, text=answer.as_text(), context=context
+        )
 
     @staticmethod
     def _to_phrases(matches: list[VectorMatch]) -> list[str]:

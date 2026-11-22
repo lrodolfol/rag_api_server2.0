@@ -11,7 +11,7 @@ as the domain :class:`RateLimitError` are still translated into the standard
 (``app/api/errors``).
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import get_rate_limiter, get_search_service
@@ -30,15 +30,24 @@ logger = get_logger(__name__)
     "/chat", response_class=StreamingResponse, responses=SSE_OPENAPI_RESPONSES
 )
 async def search_chat(
+    request: Request,
     payload: OnlineChatSearchPayload,
     service: SearchService = Depends(get_search_service),
     limiter: InMemoryRateLimiter = Depends(get_rate_limiter),
 ) -> StreamingResponse:
     """Answer an online-chat message, enforcing the per-IP rate limit first."""
-    logger.info("Online chat message received from ip='%s'", payload.user_ip)
-    await limiter.check_and_increment(str(payload.user_ip))
+    client_ip = get_client_ip(request)
+    logger.info("Online chat message received from ip='%s'", client_ip)
+    await limiter.check_and_increment(str(client_ip))
     messages = await service.search(
         HistoryChannel.ONLINE, payload.user_code, payload.message
     )
-    logger.info("Online chat response sent to ip='%s'", payload.user_ip)
+    logger.info("Online chat response sent to ip='%s'", client_ip)
     return sse_response(messages)
+
+
+def get_client_ip(request: Request) -> str:
+    if not request.client:
+        return "unknown"
+
+    return request.client.host

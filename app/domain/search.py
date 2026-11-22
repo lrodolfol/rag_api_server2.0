@@ -26,4 +26,4 @@ class OnlineChatSearchPayload(BaseModel):
 
     message: str = Field(min_length=1)
     user_code: str = Field(min_length=1)
-    user_ip: IPvAnyAddress
+    #user_ip: IPvAnyAddress

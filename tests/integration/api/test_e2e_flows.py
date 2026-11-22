@@ -36,6 +36,7 @@ from app.domain import (
     ChatAnswer,
     CompanyRegistrationRequest,
     EmbeddingRecord,
+    MessageContext,
     MessageHistoryItem,
     MessageRole,
     PayloadQuestionOpenIA,
@@ -447,6 +448,9 @@ def test_e2e_should_answer_whatsapp_message_through_real_service(semantic_cache_
         MessageRole.USER,
         MessageRole.ASSISTANT,
     ]
+    user_message, assistant_message = (item for _, _, item in history.appended)
+    assert user_message.context is None
+    assert assistant_message.context == MessageContext(rag_matches=["Padaria Central"])
 
 
 # --- Online-chat search flow -------------------------------------------------
@@ -744,6 +748,15 @@ def test_e2e_should_answer_from_semantic_then_exact_cache(semantic_cache_db: Any
     assert semantic_cache_db.select_count == 2
     assert openai.embedded_questions == ["onde vende marmitas?", "onde posso comprar marmitas?"]
     assert len(history.appended) == 6
+    # Only the pipeline answer records its RAG matches; cached answers have none.
+    assistant_contexts = [
+        item.context for _, _, item in history.appended if item.role is MessageRole.ASSISTANT
+    ]
+    assert assistant_contexts == [
+        MessageContext(rag_matches=["Marmitaria Central"]),
+        None,
+        None,
+    ]
 
 
 # --- Semantic cache invalidation cycle ----------------------------------------
