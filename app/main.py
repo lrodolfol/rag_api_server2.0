@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from app.api.dependencies import get_category_service
 from app.api.errors import register_exception_handlers
@@ -45,6 +46,19 @@ def create_app() -> FastAPI:
         version="2.0.0",
         lifespan=lifespan,
     )
+
+    origins_allowed = ["http://localhost:4200",]
+    methods_allowed = ["GET", "DEL", "POST",]
+    allow_headers = ["Authorization","Content-Type","X-API-KEY","X-Correlation-ID"]
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins_allowed,
+        allow_credentials=True,
+        allow_methods=methods_allowed,
+        allow_headers=allow_headers,
+    )
+
     application.include_router(health.router)
     application.include_router(registration.router)
     application.include_router(whatsapp.router)
