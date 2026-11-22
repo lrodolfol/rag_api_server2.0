@@ -18,6 +18,7 @@ from app.domain.company import (
     CompanyRegistrationRequest,
 )
 from app.domain.conversation import (
+    MessageContext,
     MessageHistoryItem,
     MessageRole,
     PayloadQuestionOpenIA,
@@ -50,6 +51,7 @@ __all__ = [
     "InappropriateContentError",
     "INPUT_GUIDE",
     "InvalidChatAnswerError",
+    "MessageContext",
     "MessageHistoryItem",
     "MessageRole",
     "OnlineChatSearchPayload",

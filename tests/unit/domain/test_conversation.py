@@ -3,7 +3,12 @@
 import pytest
 from pydantic import ValidationError
 
-from app.domain import MessageHistoryItem, MessageRole, PayloadQuestionOpenIA
+from app.domain import (
+    MessageContext,
+    MessageHistoryItem,
+    MessageRole,
+    PayloadQuestionOpenIA,
+)
 
 
 def test_should_flag_user_message() -> None:
@@ -26,6 +31,38 @@ def test_should_reject_unknown_role() -> None:
     # Act / Assert
     with pytest.raises(ValidationError):
         MessageHistoryItem.model_validate({"role": "system", "text": "x"})
+
+
+def test_should_default_context_to_none() -> None:
+    # Arrange / Act
+    item = MessageHistoryItem(role=MessageRole.USER, text="ola")
+
+    # Assert
+    assert item.context is None
+
+
+def test_should_create_message_with_rag_matches() -> None:
+    # Arrange
+    matches = ["Name: sabor_da_roca", "Name: padaria_central"]
+
+    # Act
+    item = MessageHistoryItem(
+        role=MessageRole.ASSISTANT,
+        text="O Sabor da Roca oferece refeicoes caseiras.",
+        context=MessageContext(rag_matches=matches),
+    )
+
+    # Assert
+    assert item.context is not None
+    assert item.context.rag_matches == matches
+
+
+def test_should_default_rag_matches_to_empty_list() -> None:
+    # Arrange / Act
+    context = MessageContext()
+
+    # Assert
+    assert context.rag_matches == []
 
 
 def test_should_default_chat_historic_to_empty_list() -> None:

@@ -196,9 +196,9 @@ class OpenAIService:
         )
         return [
             {"role": "system", "content": INPUT_GUIDE},
+            {"role": "developer", "content": f"CONTEXTO RECUPERADO PELO RAG: \n\n------\n\n {knowledge}"},
             *self._build_history(payload),
             {"role": "user", "content": f"Pergunta: {payload.question}"},
-            {"role": "system", "content": f"Trechos: \n\n------\n\n {knowledge}"},
         ]
 
     def _build_history(self, payload: PayloadQuestionOpenIA) -> list[ChatMessage]:
